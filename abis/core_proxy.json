@@ -1,0 +1,118 @@
+[
+  {
+    "type": "function",
+    "name": "getAccountOwner",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountPermissions",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple[]",
+        "components": [
+          {
+            "name": "user",
+            "type": "address"
+          },
+          {
+            "name": "permissions",
+            "type": "bytes32[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountCollateral",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      },
+      {
+        "name": "collateralType",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "totalDeposited",
+        "type": "uint256"
+      },
+      {
+        "name": "totalAssigned",
+        "type": "uint256"
+      },
+      {
+        "name": "totalLocked",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountTokenAddress",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "DelegationUpdated",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128",
+        "indexed": true
+      },
+      {
+        "name": "poolId",
+        "type": "uint128",
+        "indexed": true
+      },
+      {
+        "name": "collateralType",
+        "type": "address",
+        "indexed": false
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "leverage",
+        "type": "uint256",
+        "indexed": false
+      }
+    ]
+  }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "type": "function",
+    "name": "getImplementationAddress",
+    "inputs": [
+      {
+        "name": "interfaceName",
+        "type": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "changeImplementationAddress",
+    "inputs": [
+      {
+        "name": "interfaceName",
+        "type": "bytes32"
+      },
+      {
+        "name": "implementationAddress",
+        "type": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]

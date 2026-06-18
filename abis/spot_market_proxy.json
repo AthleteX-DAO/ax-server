@@ -1,0 +1,216 @@
+[
+  {
+    "type": "function",
+    "name": "getName",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint128"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSynth",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint128"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "buy",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint128"
+      },
+      {
+        "name": "usdAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "minAmountReceived",
+        "type": "uint256"
+      },
+      {
+        "name": "referrer",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "synthAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {
+            "name": "fixedFees",
+            "type": "uint256"
+          },
+          {
+            "name": "utilizationFees",
+            "type": "uint256"
+          },
+          {
+            "name": "skewFees",
+            "type": "int256"
+          },
+          {
+            "name": "wrapperFees",
+            "type": "int256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sell",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint128"
+      },
+      {
+        "name": "synthAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "minUsdAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "referrer",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "usdAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {
+            "name": "fixedFees",
+            "type": "uint256"
+          },
+          {
+            "name": "utilizationFees",
+            "type": "uint256"
+          },
+          {
+            "name": "skewFees",
+            "type": "int256"
+          },
+          {
+            "name": "wrapperFees",
+            "type": "int256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "SynthBought",
+    "inputs": [
+      {
+        "name": "synthMarketId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "synthReturned",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "fees",
+        "type": "tuple",
+        "indexed": false,
+        "components": [
+          {
+            "name": "fixedFees",
+            "type": "uint256"
+          },
+          {
+            "name": "utilizationFees",
+            "type": "uint256"
+          },
+          {
+            "name": "skewFees",
+            "type": "int256"
+          },
+          {
+            "name": "wrapperFees",
+            "type": "int256"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "event",
+    "name": "SynthSold",
+    "inputs": [
+      {
+        "name": "synthMarketId",
+        "type": "uint256",
+        "indexed": true
+      },
+      {
+        "name": "amountReturned",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "fees",
+        "type": "tuple",
+        "indexed": false,
+        "components": [
+          {
+            "name": "fixedFees",
+            "type": "uint256"
+          },
+          {
+            "name": "utilizationFees",
+            "type": "uint256"
+          },
+          {
+            "name": "skewFees",
+            "type": "int256"
+          },
+          {
+            "name": "wrapperFees",
+            "type": "int256"
+          }
+        ]
+      }
+    ]
+  }
+]
