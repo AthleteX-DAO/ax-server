@@ -93,6 +93,15 @@ _MARKETS: list[dict] = [
     {"id": 24, "prompt": "Will Colorado reach 8+ wins?",
      "details": "Regular season win total for Colorado football.",
      "category": "college", "end_date": "2026-12-05"},
+    # ── Real deployed market ─────────────────────────────────────
+    {"id": 25,
+     "prompt": "Will Jelly Roll and Bunnie Xo finalize their divorce by August 1, 2026?",
+     "details": "Resolves YES if Jelly Roll (Jason DeFord) and Bunnie Xo have their divorce finalized by a court on or before August 1, 2026. Resolves NO otherwise.",
+     "category": "exotic", "end_date": "2026-08-01",
+     "market_address": "0x164c1b6e1C9F3c088D3930eDE9fCA4ea8C11Ad9F",
+     "yes_token": "0xAfa41dAd6Eeb7155c2A327c4a33E4503BF172D01",
+     "no_token": "0xcf3558796C2e38B3277AbEAd647B341390d3e07d",
+     "live": True},
 ]
 
 
@@ -112,9 +121,16 @@ def _build_markets() -> list[PredictMarket]:
         volume = round(500_000 + rng.random() * 4_500_000, 2)
 
         mid = m["id"]
-        market_address = f"0x{mid:040X}"
-        yes_token = f"0x{(mid * 2 + 1):040X}"
-        no_token = f"0x{(mid * 2 + 2):040X}"
+
+        # Use real addresses for deployed markets, synthetic for seed data
+        if "market_address" in m:
+            market_address = m["market_address"]
+            yes_token = m["yes_token"]
+            no_token = m["no_token"]
+        else:
+            market_address = f"0x{mid:040X}"
+            yes_token = f"0x{(mid * 2 + 1):040X}"
+            no_token = f"0x{(mid * 2 + 2):040X}"
 
         results.append(
             PredictMarket(
