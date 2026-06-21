@@ -1,0 +1,27 @@
+[
+  {
+    "type": "function",
+    "name": "getReserves",
+    "inputs": [],
+    "outputs": [
+      {"name": "_reserve0", "type": "uint112"},
+      {"name": "_reserve1", "type": "uint112"},
+      {"name": "_blockTimestampLast", "type": "uint32"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "token0",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "address"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "token1",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "address"}],
+    "stateMutability": "view"
+  }
+]

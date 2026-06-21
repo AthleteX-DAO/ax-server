@@ -25,6 +25,8 @@ class ChainAddresses(BaseSettings):
     perps_market_proxy: str = ""  # Not yet deployed
     uma_finder: str = "0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64"
     uma_optimistic_oracle: str = "0x0A2F9bd90e88149F7d60699a8A340F46fE8BA95f"
+    apt_factory: str = "0x8720DccfCd5687AfAE5F0BFb56ff664e6D8b385B"
+    apt_router: str = "0x15e4eb77713CD274472D95bDfcc7797F6a8C2D95"
 
 
 class Settings(BaseSettings):
@@ -58,6 +60,21 @@ class Settings(BaseSettings):
 
     # ── External APIs ─────────────────────────────────────────────
     coingecko_api_key: str = ""
+
+    # ── QuestDB (time-series) ─────────────────────────────────────
+    questdb_host: str = "localhost"
+    questdb_http_port: int = 9000    # ILP ingestion + REST API
+    questdb_pg_port: int = 8812      # PostgreSQL wire protocol (asyncpg)
+    questdb_pg_user: str = "admin"
+    questdb_pg_password: str = "quest"
+
+    # ── Subgraph ──────────────────────────────────────────────────
+    dex_subgraph_url: str = "https://api.studio.thegraph.com/query/1743457/athletex-dex/v0.0.1"
+
+    # ── Ingest Worker ─────────────────────────────────────────────
+    ingest_poll_interval: int = 30   # seconds between poll cycles
+    ingest_backfill_days: int = 30   # days to backfill on first run
+    ingest_enabled: bool = True      # set False to disable background ingestion
 
     # ── Derived ───────────────────────────────────────────────────
     addresses: ChainAddresses = Field(default_factory=ChainAddresses)

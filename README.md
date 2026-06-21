@@ -1,35 +1,70 @@
 # AthleteX Agentic Backend Server
 
-FastAPI backend for the AthleteX DeFi/Sports Prediction Platform.
+FastAPI backend for the AthleteX DeFi/Sports Prediction Platform. This server provides a comprehensive API for trading, historical data, and autonomous agent orchestration.
+
+## Features
+
+- **SIWE Authentication**: Native Sign-In with Ethereum (EIP-4361) using JWT sessions.
+- **Historical Price Data**: High-performance time-series data via QuestDB (OHLCV candles and trade history).
+- **Real-time WebSocket**: Streaming data for orderbooks, market updates, and exchange status.
+- **DeFi Native**: Directly interacts with Synthetix V3, Uniswap V2 forks, and UMA Optimistic Oracle on Polygon.
+- **Exchange-Grade API**: Structured errors, multi-tiered token bucket rate limiting, and cursor pagination.
+
+## Infrastructure
+
+The server relies on the following components:
+1. **DEX Subgraph**: Pulls on-chain data and swap events (`api.studio.thegraph.com/query/1743457/athletex-dex/v0.0.1`).
+2. **QuestDB**: Time-series database for storing and querying price data.
+3. **RPC Node**: Direct connection to the Polygon blockchain.
 
 ## Quick Start
 
+### 1. Start QuestDB
+QuestDB is required for historical price data (candles, trades). It runs locally via Docker Compose.
+
 ```bash
-cd ax-server
+docker compose -f docker-compose.questdb.yml up -d
+```
+
+### 2. Configure Environment
+Copy the example environment variables and configure your keys:
+
+```bash
+cp .env.example .env
+```
+
+Ensure your `.env` contains:
+```env
+POLYGON_RPC_URL="https://polygon-rpc.com"
+JWT_SECRET="generate-a-secure-32-byte-secret"
+ACTIVE_VENUE="athletex"
+```
+
+### 3. Start the Server
+Set up the Python environment and run the FastAPI server:
+
+```bash
+# Create virtual environment
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-cp .env.example .env
+
+# Run the server
 uvicorn app.main:app --reload
 ```
 
-## Endpoints
+## Documentation
 
-| Method | Path | Description |`
-|--------|------|-------------|
-| GET | `/api/v1/health` | Health check + chain status |
-| GET | `/api/v1/markets` | List available markets |
-| GET | `/api/v1/markets/{market_id}` | Get market details |
-| GET | `/api/v1/positions/{address}` | Get positions for address |
-| POST | `/api/v1/agent/action` | Trigger agent action |
-| GET | `/api/v1/agent/status` | Get agent status |
-| WS | `/ws/events` | Real-time event stream |
+- **[API Reference](API.md)**: Comprehensive documentation of all REST endpoints and WebSocket channels.
+- **[Production Checklist](production_checklist.md)**: Security and infrastructure gaps to address before deploying to production.
 
-## Architecture
+## Architecture Highlights
 
-- **agents/** - Autonomous agent framework (base, market, execution, listener)
-- **chain/** - On-chain interaction layer (Synthetix V3, Uniswap V2, UMA)
-- **models/** - Pydantic data models
-- **services/** - Business logic (pricing, portfolio)
+- **`app/api/v1/`**: Modular routers for spot, predict, vaults, auth, history, portfolio, and orders.
+- **`app/api/ws/`**: Production-grade WebSocket server with a background `MarketPoller` fetching real on-chain data.
+- **`app/auth/`**: Complete EIP-4361 SIWE implementation.
+- **`app/chain/`**: On-chain interaction layer wrapping smart contracts.
+- **`app/services/questdb_client.py`**: Dual-protocol client for QuestDB (ILP for fast writes, PGWire for async reads).
+- **`app/services/price_ingest.py`**: Background worker that continuously polls the subgraph and writes to QuestDB.
 
 ## Contracts (Polygon Mainnet - Chain ID 137)
 

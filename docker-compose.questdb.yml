@@ -1,0 +1,24 @@
+services:
+  questdb:
+    image: questdb/questdb:latest
+    container_name: ax-questdb
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # Web Console + REST API (used by Flutter QuestDBPriceClient)
+      - "9009:9009"   # ILP ingestion (InfluxDB Line Protocol)
+      - "8812:8812"   # PostgreSQL wire protocol (asyncpg queries)
+      - "9003:9003"   # Health check (/status)
+    volumes:
+      - questdb_data:/var/lib/questdb
+    environment:
+      - QDB_PG_USER=admin
+      - QDB_PG_PASSWORD=quest
+      - QDB_TELEMETRY_ENABLED=false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9003/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  questdb_data:

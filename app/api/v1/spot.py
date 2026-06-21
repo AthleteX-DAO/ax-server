@@ -1,12 +1,13 @@
 """Spot Market endpoints — Synthetix V3 SpotMarketProxy reads.
 
-L0 (public): market list, prices, quotes.
+L0 (public): market list (cursor-paginated), prices, quotes.
 L2 (auth):   balances, buy/sell tx builders (Phase 3).
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from web3 import Web3
 
 from app.deps import ChainProviderDep
@@ -14,18 +15,54 @@ from app.models.trading import SpotMarket, SpotPrice, SpotQuote
 
 router = APIRouter(prefix="/spot", tags=["spot"])
 
+# ── Pagination Models ───────────────────────────────────────────────────
 
-@router.get("/markets", response_model=list[SpotMarket])
-async def list_spot_markets(chain: ChainProviderDep):
-    """List all synth markets on SpotMarketProxy."""
+_MAX_MARKET_SCAN = 50  # upper bound for market ID scan
+
+
+class PaginatedMarkets(BaseModel):
+    """Cursor-paginated list of spot markets."""
+
+    markets: list[SpotMarket]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────
+
+
+@router.get("/markets", response_model=PaginatedMarkets)
+async def list_spot_markets(
+    chain: ChainProviderDep,
+    cursor: int | None = Query(None, ge=0, description="Last market_id seen (start after this)"),
+    limit: int = Query(20, ge=1, le=100, description="Max markets to return"),
+):
+    """List synth markets with cursor-based pagination.
+
+    Pass the ``next_cursor`` value from the response as ``cursor`` in
+    the next request to get the next page.
+
+    Examples::
+
+        GET /spot/markets              → first 20 markets
+        GET /spot/markets?limit=5      → first 5 markets
+        GET /spot/markets?cursor=5     → markets after ID 5
+    """
     from app.chain.synthetix import SynthetixClient
 
-    snx = SynthetixClient(chain.w3, chain._rpc_urls)  # noqa: will fix DI
-    # Known market IDs — extend as new synths are registered
-    # TODO: read from on-chain registry or config
-    known_ids = [1, 2, 3, 4, 5]
-    markets = []
-    for mid in known_ids:
+    snx = SynthetixClient(chain.w3, chain._rpc_urls)
+
+    start_id = (cursor + 1) if cursor is not None else 1
+    markets: list[SpotMarket] = []
+    scanned = 0
+    consecutive_misses = 0
+    last_found_id: int | None = None
+
+    for mid in range(start_id, start_id + _MAX_MARKET_SCAN):
+        if len(markets) >= limit:
+            break
+        scanned += 1
+
         try:
             info = await snx.get_synth_market_info(mid)
             markets.append(SpotMarket(
@@ -33,9 +70,24 @@ async def list_spot_markets(chain: ChainProviderDep):
                 name=info.get("name", f"Synth {mid}"),
                 synth_address=info.get("synth_address", ""),
             ))
+            last_found_id = mid
+            consecutive_misses = 0
         except Exception:
+            consecutive_misses += 1
+            # Stop scanning after 5 consecutive misses (no more markets)
+            if consecutive_misses >= 5:
+                break
             continue
-    return markets
+
+    # Determine if there are more markets
+    has_more = len(markets) >= limit and consecutive_misses < 5
+    next_cursor = str(last_found_id) if has_more and last_found_id is not None else None
+
+    return PaginatedMarkets(
+        markets=markets,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.get("/markets/{market_id}/price", response_model=SpotPrice)

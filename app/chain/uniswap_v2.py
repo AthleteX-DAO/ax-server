@@ -7,14 +7,19 @@ the AthleteX Uniswap V2 fork deployed on Polygon.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
+from eth_account.signers.local import LocalAccount
 from web3 import Web3
 from web3.contract import Contract
 
 from app.chain.contracts import get_contract
 
 logger = logging.getLogger("ax-server.chain.uniswap_v2")
+
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+GAS_BUFFER = 1.2  # 20% gas estimate buffer
 
 
 class UniswapV2Client:
@@ -29,10 +34,12 @@ class UniswapV2Client:
         w3: Web3,
         router_address: str | None = None,
         factory_address: str | None = None,
+        account: LocalAccount | None = None,
     ) -> None:
         self.w3 = w3
         self.router_address = router_address
         self.factory_address = factory_address
+        self.account = account
         self._router: Contract | None = None
         self._factory: Contract | None = None
 
@@ -50,6 +57,23 @@ class UniswapV2Client:
             self._factory = get_contract(self.w3, self.factory_address, "uniswap_v2_factory")
         return self._factory
 
+    def _build_tx_params(self) -> dict[str, Any]:
+        """Common transaction parameters for signed sends."""
+        return {
+            "from": self.account.address,
+            "chainId": 137,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address),
+        }
+
+    def _sign_and_send(self, tx: dict[str, Any]) -> dict[str, Any]:
+        """Estimate gas, sign, send, and wait for receipt."""
+        gas = self.w3.eth.estimate_gas(tx)
+        tx["gas"] = int(gas * GAS_BUFFER)
+        signed = self.account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        return dict(receipt)
+
     async def get_pair(self, token_a: str, token_b: str) -> str | None:
         """Get the pair address for two tokens.
 
@@ -60,8 +84,14 @@ class UniswapV2Client:
         Returns:
             Pair contract address, or None if no pair exists.
         """
-        # TODO: Call factory.functions.getPair(tokenA, tokenB)
-        return None
+        if not self.factory:
+            return None
+        addr_a = Web3.to_checksum_address(token_a)
+        addr_b = Web3.to_checksum_address(token_b)
+        pair = self.factory.functions.getPair(addr_a, addr_b).call()
+        if pair == ZERO_ADDRESS:
+            return None
+        return pair
 
     async def get_reserves(self, pair_address: str) -> tuple[int, int]:
         """Get reserves for a liquidity pair.
@@ -72,8 +102,14 @@ class UniswapV2Client:
         Returns:
             Tuple of (reserve0, reserve1) in wei.
         """
-        # TODO: Call pair.functions.getReserves()
-        return (0, 0)
+        pair = get_contract(self.w3, pair_address, "uniswap_v2_pair")
+        result = pair.functions.getReserves().call()
+        return (result[0], result[1])
+
+    async def get_token0(self, pair_address: str) -> str:
+        """Get token0 address for a pair."""
+        pair = get_contract(self.w3, pair_address, "uniswap_v2_pair")
+        return pair.functions.token0().call()
 
     async def get_amount_out(
         self,
@@ -91,7 +127,6 @@ class UniswapV2Client:
         Returns:
             Output amount in wei.
         """
-        # Standard Uniswap V2 formula: amountOut = (amountIn * 997 * reserveOut) / (reserveIn * 1000 + amountIn * 997)
         if reserve_in == 0 or reserve_out == 0:
             return 0
         amount_in_with_fee = amount_in * 997
@@ -119,8 +154,17 @@ class UniswapV2Client:
         Returns:
             Transaction receipt.
         """
-        # TODO: Build and sign swap transaction
-        return {"status": "not_implemented"}
+        if not self.router or not self.account:
+            raise RuntimeError("Router and account required for swap")
+        checksummed_path = [Web3.to_checksum_address(t) for t in path]
+        tx = self.router.functions.swapExactTokensForTokens(
+            amount_in,
+            amount_out_min,
+            checksummed_path,
+            Web3.to_checksum_address(to),
+            deadline,
+        ).build_transaction(self._build_tx_params())
+        return self._sign_and_send(tx)
 
     async def add_liquidity(
         self,
@@ -148,5 +192,16 @@ class UniswapV2Client:
         Returns:
             Transaction receipt with amounts deposited and LP tokens minted.
         """
-        # TODO: Build and sign addLiquidity transaction
-        return {"status": "not_implemented"}
+        if not self.router or not self.account:
+            raise RuntimeError("Router and account required for addLiquidity")
+        tx = self.router.functions.addLiquidity(
+            Web3.to_checksum_address(token_a),
+            Web3.to_checksum_address(token_b),
+            amount_a_desired,
+            amount_b_desired,
+            amount_a_min,
+            amount_b_min,
+            Web3.to_checksum_address(to),
+            deadline,
+        ).build_transaction(self._build_tx_params())
+        return self._sign_and_send(tx)

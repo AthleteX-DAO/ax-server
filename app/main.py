@@ -21,18 +21,64 @@ logger = logging.getLogger("ax-server")
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle hook.
 
-    - On startup: initialise chain providers, start listener agents.
-    - On shutdown: gracefully stop agents, close connections.
+    On startup:
+    - Initialize QuestDB connection pool + ensure tables
+    - Start the background price ingest worker
+
+    On shutdown:
+    - Stop the ingest worker
+    - Close QuestDB connections
     """
     settings = get_settings()
     logger.info("Starting AthleteX server on chain_id=%s", settings.default_chain_id)
 
     # --- startup -------------------------------------------------
-    # Future: start listener agents, warm caches, open WS subscriptions
+
+    # QuestDB + Ingest Worker
+    questdb_client = None
+    ingest_worker = None
+
+    try:
+        from app.services.questdb_client import QuestDBClient
+
+        questdb_client = QuestDBClient(
+            host=settings.questdb_host,
+            http_port=settings.questdb_http_port,
+            pg_port=settings.questdb_pg_port,
+            pg_user=settings.questdb_pg_user,
+            pg_password=settings.questdb_pg_password,
+        )
+        await questdb_client.init()
+        app.state.questdb = questdb_client
+        logger.info("QuestDB client initialized")
+
+        if settings.ingest_enabled:
+            from app.chain.subgraph import SubgraphClient
+            from app.services.price_ingest import PriceIngestWorker
+
+            subgraph = SubgraphClient(url=settings.dex_subgraph_url)
+            ingest_worker = PriceIngestWorker(
+                settings=settings,
+                questdb=questdb_client,
+                subgraph=subgraph,
+            )
+            await ingest_worker.start()
+            logger.info("Price ingest worker started")
+
+    except Exception:
+        logger.warning("QuestDB not available — historical data disabled", exc_info=True)
+        app.state.questdb = None
+
     yield
+
     # --- shutdown ------------------------------------------------
     logger.info("Shutting down AthleteX server")
-    # Future: stop agents, close web3 connections
+
+    if ingest_worker:
+        await ingest_worker.stop()
+
+    if questdb_client:
+        await questdb_client.close()
 
 
 def create_app() -> FastAPI:
@@ -45,6 +91,16 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # ── Error handlers (exchange-grade structured errors) ─────────
+    from app.middleware.errors import register_error_handlers
+
+    register_error_handlers(app)
+
+    # ── Rate limiter (token-bucket, per-IP) ───────────────────────
+    from app.middleware.rate_limit import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
 
     # ── CORS for Flutter web frontend ─────────────────────────────
     app.add_middleware(

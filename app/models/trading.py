@@ -84,15 +84,22 @@ class CollateralPrice(BaseModel):
 # ── Prediction ──────────────────────────────────────────────────────────
 
 class PredictMarket(BaseModel):
-    market_id: str
-    question: str
-    outcome1: str
-    outcome2: str
-    outcome1_price: float
-    outcome2_price: float
-    resolved: bool = False
-    volume: float = 0.0
+    """Full prediction market payload consumed by the Flutter frontend."""
+
+    id: int
+    prompt: str
+    details: str = ""
+    market_address: str = ""
+    yes_token_address: str = ""
+    no_token_address: str = ""
+    yes_name: str = "YES"
+    no_name: str = "NO"
+    yes_price: float = 0.50
+    no_price: float = 0.50
+    trading_volume: float = 0.0
+    end_date: str = ""
     category: str = ""
+    resolved: bool | None = None
 
 
 class PredictPrice(BaseModel):
@@ -107,6 +114,21 @@ class PredictPosition(BaseModel):
     wallet: str
     outcome1_balance: str  # wei
     outcome2_balance: str  # wei
+
+
+class PricePoint(BaseModel):
+    """Single price data point."""
+
+    timestamp: str
+    price: float
+
+
+class PriceHistory(BaseModel):
+    """YES/NO price history for a prediction market."""
+
+    market_id: int
+    yes_history: list[PricePoint] = Field(default_factory=list)
+    no_history: list[PricePoint] = Field(default_factory=list)
 
 
 # ── Versus ──────────────────────────────────────────────────────────────
@@ -127,3 +149,67 @@ class VersusAthlete(BaseModel):
 class VersusMatchup(BaseModel):
     athlete_a: VersusAthlete
     athlete_b: VersusAthlete
+
+
+# ── Admin / Deployment ──────────────────────────────────────────────────
+
+class DeployMarketRequest(BaseModel):
+    """Request to deploy a new prediction market."""
+
+    pair_name: str
+    question: str
+    category: str = ""
+    details: str = ""
+    resolve_by: str = ""
+    initial_liquidity_usd: float = 1000.0
+
+
+class RegisterMarketRequest(BaseModel):
+    """Request to register an already-deployed market."""
+
+    contract_address: str
+    yes_token: str
+    no_token: str
+    question: str
+    category: str = ""
+    details: str = ""
+    resolve_by: str = ""
+    pair_name: str = ""
+
+
+class MarketOnChainData(BaseModel):
+    """On-chain state snapshot for a prediction market."""
+
+    price_requested: bool = False
+    market_resolved: bool = False
+    settlement_price: str = "0"
+    yes_total_supply: str = "0"
+    no_total_supply: str = "0"
+    yes_price: float = 0.5
+    no_price: float = 0.5
+
+
+class RegisteredMarket(BaseModel):
+    """A market stored in the deployment registry."""
+
+    market_address: str = Field(default="", alias="market_address")
+    yes_token: str = ""
+    no_token: str = ""
+    question: str = ""
+    category: str = ""
+    details: str = ""
+    resolve_by: str = ""
+    pair_name: str = ""
+    yes_pair_address: str | None = None
+    no_pair_address: str | None = None
+    registered_at: str = ""
+    on_chain: MarketOnChainData | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class DeployMarketResponse(BaseModel):
+    """Response from market deployment or registration."""
+
+    status: str
+    market: RegisteredMarket

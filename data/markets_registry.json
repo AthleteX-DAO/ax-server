@@ -1,0 +1,19 @@
+{
+  "markets": [
+    {
+      "id": 1,
+      "pair_name": "AIYUK_TRADE_2026",
+      "prompt": "Will Brandon Aiyuk be traded before the 2026 League Year?",
+      "category": "football",
+      "details": "Resolves YES if Brandon Aiyuk is officially traded from the San Francisco 49ers to another NFL team before the start of the 2026 NFL League Year (typically mid-March 2026).",
+      "resolve_by": "2026-03-12",
+      "market_address": "0x65c63A783722a316c246A88D1Eef892e2d6c4e5C",
+      "yes_token": "0x3A8309167EA3db591928b723a883A9a33C49357c",
+      "no_token": "0xaEee2be5c176d2029eBD773E9fE27C81720172E6",
+      "yes_pair_address": "",
+      "no_pair_address": "",
+      "deployed_at": "2025-07-14T00:00:00Z",
+      "status": "active"
+    }
+  ]
+}
