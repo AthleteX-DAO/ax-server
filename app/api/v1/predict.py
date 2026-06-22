@@ -248,9 +248,9 @@ async def get_prediction_history(
     questdb = getattr(request.app.state, "questdb", None) if request else None
     if questdb is not None:
         try:
-            from datetime import datetime, timedelta, timezone
+            from datetime import datetime, timedelta
 
-            end_ts = datetime.now(timezone.utc)
+            end_ts = datetime.utcnow()
             start_ts = end_ts - timedelta(days=days)
 
             # Find the QuestDB market_id for this prediction market's tokens.
@@ -278,7 +278,7 @@ async def get_prediction_history(
             no_points: list[PricePoint] = []
 
             if yes_pair:
-                # Query trades for the YES/axUSD pair
+                # Query trades for the YES/axUSD pair by LP pool address
                 yes_candles = await questdb.get_candles_by_pair(
                     pair_address=yes_pair,
                     timeframe="1d" if days > 7 else "1h",
@@ -303,6 +303,40 @@ async def get_prediction_history(
                         timestamp=c["ts"].strftime("%Y-%m-%dT%H:%M:%S"),
                         price=round(c["close"], 4),
                     ))
+
+            # Fallback: query by symbol-based market_id (e.g. "axUSD-YES")
+            # This covers backfilled data where pair_address may be empty.
+            if not yes_points:
+                for yes_id_candidate in ["axUSD-YES", "YES-axUSD"]:
+                    yes_candles = await questdb.get_candles(
+                        market_id=yes_id_candidate,
+                        timeframe="1d" if days > 7 else "1h",
+                        start_ts=start_ts,
+                        end_ts=end_ts,
+                    )
+                    if yes_candles:
+                        for c in yes_candles:
+                            yes_points.append(PricePoint(
+                                timestamp=c["ts"].strftime("%Y-%m-%dT%H:%M:%S"),
+                                price=round(c["close"], 4),
+                            ))
+                        break
+
+            if not no_points:
+                for no_id_candidate in ["axUSD-NO", "NO-axUSD"]:
+                    no_candles = await questdb.get_candles(
+                        market_id=no_id_candidate,
+                        timeframe="1d" if days > 7 else "1h",
+                        start_ts=start_ts,
+                        end_ts=end_ts,
+                    )
+                    if no_candles:
+                        for c in no_candles:
+                            no_points.append(PricePoint(
+                                timestamp=c["ts"].strftime("%Y-%m-%dT%H:%M:%S"),
+                                price=round(c["close"], 4),
+                            ))
+                        break
 
             if yes_points or no_points:
                 return PriceHistory(
