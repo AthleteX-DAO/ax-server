@@ -360,3 +360,57 @@ class QuestDBClient:
             rows = await conn.fetch(query)
 
         return [r["market_type"] for r in rows]
+
+    async def get_candles_by_pair(
+        self,
+        pair_address: str,
+        timeframe: str,
+        start_ts: datetime,
+        end_ts: datetime,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Query candles filtered by ``pair_address`` instead of ``market_id``.
+
+        Useful for prediction markets where the registry stores LP pool
+        addresses rather than symbol-based market IDs.
+
+        Args:
+            pair_address: Lowercase LP pool contract address.
+            timeframe: One of ``ALLOWED_TIMEFRAMES``.
+            start_ts: Inclusive start timestamp.
+            end_ts: Inclusive end timestamp.
+            limit: Maximum rows to return.
+
+        Returns:
+            List of candle dicts.
+        """
+        if timeframe not in ALLOWED_TIMEFRAMES:
+            raise ValueError(
+                f"Invalid timeframe {timeframe!r}. "
+                f"Allowed: {sorted(ALLOWED_TIMEFRAMES)}"
+            )
+
+        pool = self._require_pool()
+        sample_by = _TIMEFRAME_TO_SAMPLE_BY[timeframe]
+
+        query = f"""
+            SELECT
+                ts,
+                first(price) AS open,
+                max(price)   AS high,
+                min(price)   AS low,
+                last(price)  AS close,
+                sum(amount)  AS volume,
+                count()      AS trade_count
+            FROM trades
+            WHERE pair_address = $1
+              AND ts >= $2
+              AND ts <= $3
+            SAMPLE BY {sample_by}
+            LIMIT $4;
+        """
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, pair_address, start_ts, end_ts, limit)
+
+        return [dict(r) for r in rows]

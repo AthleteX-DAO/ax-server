@@ -42,9 +42,10 @@ async def lifespan(app: FastAPI):
         from app.services.questdb_client import QuestDBClient
 
         questdb_client = QuestDBClient(
-            host=settings.questdb_host,
-            http_port=settings.questdb_http_port,
+            pg_host=settings.questdb_host,
             pg_port=settings.questdb_pg_port,
+            ilp_host=settings.questdb_host,
+            ilp_port=settings.questdb_http_port,
             pg_user=settings.questdb_pg_user,
             pg_password=settings.questdb_pg_password,
         )

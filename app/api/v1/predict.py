@@ -10,7 +10,7 @@ import math
 import random
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.models.trading import PredictMarket, PredictPrice, PriceHistory, PricePoint
 
@@ -227,23 +227,106 @@ def _generate_price_series(
 @router.get("/markets/{market_id}/history", response_model=PriceHistory)
 async def get_prediction_history(
     market_id: int,
+    request: Request,
     days: int = Query(30, ge=1, le=365, description="Number of days of history"),
 ):
-    """Return YES/NO price history for a prediction market."""
+    """Return YES/NO price history for a prediction market.
+
+    Tries QuestDB first (real trade data), falls back to mock series.
+    """
+
+    # Resolve the market
+    market = None
     for m in _get_markets():
         if m.id == market_id:
-            yes_history = _generate_price_series(
-                m.prompt, days, m.yes_price,
+            market = m
+            break
+    if market is None:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    # Attempt QuestDB read
+    questdb = getattr(request.app.state, "questdb", None) if request else None
+    if questdb is not None:
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            end_ts = datetime.now(timezone.utc)
+            start_ts = end_ts - timedelta(days=days)
+
+            # Find the QuestDB market_id for this prediction market's tokens.
+            # The ingest worker stores market_id as "YESSYM-axUSD" etc.
+            # We query by pair_address (the LP pool address) which is more
+            # reliable.  For prediction markets we look up via the registry.
+            registry = _load_registry()
+            yes_pair = None
+            no_pair = None
+            for rm in registry:
+                if rm.get("contract_address", "").lower() == market.market_address.lower():
+                    yes_pair = rm.get("yes_pair_address", "").lower()
+                    no_pair = rm.get("no_pair_address", "").lower()
+                    break
+
+            # Also try matching on token addresses from the seed data
+            if not yes_pair:
+                for rm in registry:
+                    if rm.get("yes_token", "").lower() == market.yes_token_address.lower():
+                        yes_pair = rm.get("yes_pair_address", "").lower()
+                        no_pair = rm.get("no_pair_address", "").lower()
+                        break
+
+            yes_points: list[PricePoint] = []
+            no_points: list[PricePoint] = []
+
+            if yes_pair:
+                # Query trades for the YES/axUSD pair
+                yes_candles = await questdb.get_candles_by_pair(
+                    pair_address=yes_pair,
+                    timeframe="1d" if days > 7 else "1h",
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+                for c in yes_candles:
+                    yes_points.append(PricePoint(
+                        timestamp=c["ts"].strftime("%Y-%m-%dT%H:%M:%S"),
+                        price=round(c["close"], 4),
+                    ))
+
+            if no_pair:
+                no_candles = await questdb.get_candles_by_pair(
+                    pair_address=no_pair,
+                    timeframe="1d" if days > 7 else "1h",
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+                for c in no_candles:
+                    no_points.append(PricePoint(
+                        timestamp=c["ts"].strftime("%Y-%m-%dT%H:%M:%S"),
+                        price=round(c["close"], 4),
+                    ))
+
+            if yes_points or no_points:
+                return PriceHistory(
+                    market_id=market_id,
+                    yes_history=yes_points,
+                    no_history=no_points,
+                )
+
+        except Exception as _exc:
+            import logging
+            logging.getLogger("ax-server").warning(
+                "QuestDB history query failed for market %d: %s", market_id, _exc,
             )
-            no_history = _generate_price_series(
-                m.prompt, days, m.yes_price, invert=True,
-            )
-            return PriceHistory(
-                market_id=market_id,
-                yes_history=yes_history,
-                no_history=no_history,
-            )
-    raise HTTPException(status_code=404, detail="Market not found")
+
+    # Fallback: deterministic mock series
+    yes_history = _generate_price_series(market.prompt, days, market.yes_price)
+    no_history = _generate_price_series(
+        market.prompt, days, market.yes_price, invert=True,
+    )
+    return PriceHistory(
+        market_id=market_id,
+        yes_history=yes_history,
+        no_history=no_history,
+    )
 
 
 # ── Stats endpoints (Vote/Dashboard page) ────────────────────────────────

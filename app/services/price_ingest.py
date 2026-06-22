@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from app.config import Settings
+from app.services.questdb_client import TradeRow
 
 logger = logging.getLogger("ax-server.ingest")
 
@@ -121,17 +122,17 @@ class PriceIngestWorker:
                         else:
                             price = 0.0
 
-                        trades.append({
-                            "ts": datetime.fromtimestamp(ts, tz=timezone.utc),
-                            "market_id": market_id,
-                            "market_type": _classify_market(t0_sym, t1_sym),
-                            "price": price,
-                            "amount": vol / max(price, 0.001) if price > 0 else 0,
-                            "amount_usd": vol,
-                            "side": "buy",
-                            "tx_hash": f"backfill-{pair_id}-{ts}",
-                            "pair_address": pair_id,
-                        })
+                        trades.append(TradeRow(
+                            ts=datetime.fromtimestamp(ts, tz=timezone.utc),
+                            market_id=market_id,
+                            market_type=_classify_market(t0_sym, t1_sym),
+                            price=price,
+                            amount=vol / max(price, 0.001) if price > 0 else 0,
+                            amount_usd=vol,
+                            side="buy",
+                            tx_hash=f"backfill-{pair_id}-{ts}",
+                            pair_address=pair_id,
+                        ))
 
                     if trades:
                         await self._qdb.ingest_trades(trades)
@@ -188,17 +189,17 @@ class PriceIngestWorker:
                 else:
                     continue
 
-                trades.append({
-                    "ts": datetime.fromtimestamp(ts, tz=timezone.utc),
-                    "market_id": market_id,
-                    "market_type": _classify_market(t0_sym, t1_sym),
-                    "price": price,
-                    "amount": amount,
-                    "amount_usd": amount_usd,
-                    "side": side,
-                    "tx_hash": s.get("id", ""),
-                    "pair_address": pair.get("id", ""),
-                })
+                trades.append(TradeRow(
+                    ts=datetime.fromtimestamp(ts, tz=timezone.utc),
+                    market_id=market_id,
+                    market_type=_classify_market(t0_sym, t1_sym),
+                    price=price,
+                    amount=amount,
+                    amount_usd=amount_usd,
+                    side=side,
+                    tx_hash=s.get("id", ""),
+                    pair_address=pair.get("id", ""),
+                ))
 
             if trades:
                 await self._qdb.ingest_trades(trades)
