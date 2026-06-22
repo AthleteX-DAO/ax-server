@@ -285,11 +285,11 @@ class QuestDBClient:
               AND ts >= $2
               AND ts <= $3
             SAMPLE BY {sample_by}
-            LIMIT $4;
+            LIMIT {int(limit)};
         """
 
         async with pool.acquire() as conn:
-            rows = await conn.fetch(query, market_id, start_ts, end_ts, limit)
+            rows = await conn.fetch(query, market_id, start_ts, end_ts)
 
         return [dict(r) for r in rows]
 
@@ -407,10 +407,10 @@ class QuestDBClient:
               AND ts >= $2
               AND ts <= $3
             SAMPLE BY {sample_by}
-            LIMIT $4;
+            LIMIT {int(limit)};
         """
 
         async with pool.acquire() as conn:
-            rows = await conn.fetch(query, pair_address, start_ts, end_ts, limit)
+            rows = await conn.fetch(query, pair_address, start_ts, end_ts)
 
         return [dict(r) for r in rows]

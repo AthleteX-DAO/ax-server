@@ -1,0 +1,24 @@
+services:
+  questdb:
+    image: questdb/questdb:latest
+    container_name: ax-questdb
+    restart: unless-stopped
+    ports:
+      - "19000:9000"
+      - "19009:9009"
+      - "18812:8812"
+      - "19003:9003"
+    volumes:
+      - questdb_data:/var/lib/questdb
+    environment:
+      - QDB_PG_USER=admin
+      - QDB_PG_PASSWORD=quest
+      - QDB_TELEMETRY_ENABLED=false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9003/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  questdb_data:
