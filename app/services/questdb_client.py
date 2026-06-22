@@ -293,6 +293,34 @@ class QuestDBClient:
 
         return [dict(r) for r in rows]
 
+    async def get_24h_volume(self, market_type: str = "predict") -> dict[str, float]:
+        """Get 24-hour trading volume grouped by market_id.
+
+        Returns a dict mapping market_id → total_volume_usd.
+        """
+        pool = await self._get_pool()
+
+        query = """
+            SELECT
+                market_id,
+                sum(amount_usd) AS volume_usd,
+                count()         AS trade_count
+            FROM trades
+            WHERE market_type = $1
+              AND ts >= dateadd('d', -1, now())
+            GROUP BY market_id;
+        """
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, market_type)
+
+        result: dict[str, float] = {}
+        for r in rows:
+            mid = r["market_id"]
+            vol = r["volume_usd"] or 0.0
+            result[mid] = vol
+        return result
+
     async def get_latest_price(self, market_id: str) -> dict[str, Any] | None:
         """Get the most recent price for a market via ``LATEST ON``.
 

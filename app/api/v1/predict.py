@@ -176,10 +176,23 @@ async def list_prediction_markets(
 
 
 @router.get("/markets/{market_id}", response_model=PredictMarket)
-async def get_prediction_market(market_id: int):
+async def get_prediction_market(market_id: int, request: Request = None):
     """Get single prediction market by numeric ID."""
     for m in _get_markets():
         if m.id == market_id:
+            # Try to get real 24h volume from QuestDB
+            questdb = getattr(request.app.state, "questdb", None) if request else None
+            if questdb is not None:
+                try:
+                    volumes = await questdb.get_24h_volume("predict")
+                    # Sum YES + NO volumes for this market
+                    yes_vol = volumes.get("axUSD-YES", 0) + volumes.get("YES-axUSD", 0)
+                    no_vol = volumes.get("axUSD-NO", 0) + volumes.get("NO-axUSD", 0)
+                    real_volume = yes_vol + no_vol
+                    if real_volume > 0:
+                        m = m.model_copy(update={"trading_volume": round(real_volume, 2)})
+                except Exception:
+                    pass  # Fall back to seed volume
             return m
     raise HTTPException(status_code=404, detail="Market not found")
 
