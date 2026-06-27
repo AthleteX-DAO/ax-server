@@ -18,8 +18,13 @@ from app.middleware.errors import APIError
 from app.models.trading import (
     DeployMarketRequest,
     DeployMarketResponse,
+    InitializeMarketRequest,
     RegisteredMarket,
     RegisterMarketRequest,
+    ResolveMarketRequest,
+    TxResponse,
+    UnsignedTx,
+    UpdateMarketStatusRequest,
 )
 
 logger = logging.getLogger("ax-server.api.admin")
@@ -181,3 +186,126 @@ async def list_registered_markets(
         results.append(entry)
 
     return results
+
+
+OUTCOME_MAP = {"YES", "NO", "SPLIT"}
+VALID_STATUSES = {"active", "paused", "resolved", "settled"}
+
+
+@router.post("/initialize-market", response_model=TxResponse)
+async def initialize_market(
+    body: InitializeMarketRequest,
+    auth: RequireMarketMaker,
+    settings: SettingsDep,
+    chain: ChainProviderDep,
+):
+    """Build unsigned adminInitialize() transaction.
+
+    Sets ``priceRequested = true`` on the market contract (owner-only).
+    Required before users can call ``create()`` to mint YES+NO tokens.
+    """
+    deployer = _get_deployer(settings, chain)
+    try:
+        tx_data = deployer.build_initialize_tx(body.market_address)
+    except Exception as e:
+        raise APIError(
+            code=DEPLOY_ERROR,
+            message=f"Failed to build initialize TX: {e}",
+            status_code=400,
+        )
+
+    return TxResponse(
+        transaction=UnsignedTx(**tx_data),
+        metadata={
+            "action": "adminInitialize",
+            "market_address": body.market_address,
+        },
+    )
+
+
+@router.post("/resolve-market", response_model=TxResponse)
+async def resolve_market(
+    body: ResolveMarketRequest,
+    auth: RequireMarketMaker,
+    settings: SettingsDep,
+    chain: ChainProviderDep,
+):
+    """Build unsigned ownerResolve() transaction.
+
+    Resolves the market directly:
+      - ``YES``   → settlement price = 1e18 (long holders win)
+      - ``NO``    → settlement price = 0 (short holders win)
+      - ``SPLIT`` → settlement price = 5e17 (50/50)
+
+    After signing and broadcasting, call ``PATCH /admin/markets/{address}/status``
+    to update the registry.
+    """
+    if body.outcome.upper() not in OUTCOME_MAP:
+        raise APIError(
+            code="INVALID_OUTCOME",
+            message=f"Outcome must be one of: {', '.join(sorted(OUTCOME_MAP))}",
+            status_code=400,
+        )
+
+    deployer = _get_deployer(settings, chain)
+    try:
+        tx_data = deployer.build_resolve_tx(body.market_address, body.outcome)
+    except Exception as e:
+        raise APIError(
+            code=DEPLOY_ERROR,
+            message=f"Failed to build resolve TX: {e}",
+            status_code=400,
+        )
+
+    # Update registry status
+    try:
+        await deployer.update_market_status(
+            body.market_address,
+            status="resolved",
+            outcome=body.outcome.upper(),
+            resolved_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except ValueError:
+        logger.warning("Market %s not in registry — TX built but status not updated", body.market_address)
+
+    return TxResponse(
+        transaction=UnsignedTx(**tx_data),
+        metadata={
+            "action": "ownerResolve",
+            "market_address": body.market_address,
+            "outcome": body.outcome.upper(),
+        },
+    )
+
+
+@router.patch("/markets/{market_address}/status")
+async def update_market_status(
+    market_address: str,
+    body: UpdateMarketStatusRequest,
+    auth: RequireMarketMaker,
+    settings: SettingsDep,
+    chain: ChainProviderDep,
+):
+    """Update a market's status in the registry.
+
+    Valid statuses: ``active``, ``paused``, ``resolved``, ``settled``.
+    """
+    if body.status not in VALID_STATUSES:
+        raise APIError(
+            code="INVALID_STATUS",
+            message=f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}",
+            status_code=400,
+        )
+
+    deployer = _get_deployer(settings, chain)
+    try:
+        await deployer.update_market_status(market_address, status=body.status)
+    except ValueError as e:
+        raise APIError(
+            code="MARKET_NOT_FOUND",
+            message=str(e),
+            status_code=404,
+        )
+
+    return {"status": "updated", "market_address": market_address, "new_status": body.status}
+

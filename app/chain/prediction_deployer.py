@@ -224,3 +224,84 @@ class PredictionDeployer:
         if isinstance(data, list):
             return data
         return []
+
+    def build_initialize_tx(self, market_address: str) -> dict[str, Any]:
+        """Build unsigned calldata for adminInitialize() on a prediction market.
+
+        The contract's adminInitialize() is owner-only and sets priceRequested=true
+        without going through UMA. Required before users can call create().
+        """
+        market = get_contract(self.w3, market_address, "event_based_prediction_market")
+        calldata = market.functions.adminInitialize().build_transaction({
+            "from": "0x0000000000000000000000000000000000000000",
+            "chainId": 137,
+            "gas": 0,
+            "gasPrice": 0,
+            "nonce": 0,
+        })
+        return {
+            "to": market_address,
+            "data": calldata["data"],
+            "value": "0",
+            "chain_id": 137,
+        }
+
+    def build_resolve_tx(self, market_address: str, outcome: str) -> dict[str, Any]:
+        """Build unsigned calldata for ownerResolve(int256 _price).
+
+        Outcome mapping:
+          - "YES"   → 1e18 (long token holders win)
+          - "NO"    → 0    (short token holders win)
+          - "SPLIT" → 5e17 (50/50 split)
+        """
+        price_map = {
+            "YES": int(1e18),
+            "NO": 0,
+            "SPLIT": int(5e17),
+        }
+        price = price_map.get(outcome.upper())
+        if price is None:
+            raise ValueError(f"Invalid outcome '{outcome}'. Must be YES, NO, or SPLIT.")
+
+        market = get_contract(self.w3, market_address, "event_based_prediction_market")
+        calldata = market.functions.ownerResolve(price).build_transaction({
+            "from": "0x0000000000000000000000000000000000000000",
+            "chainId": 137,
+            "gas": 0,
+            "gasPrice": 0,
+            "nonce": 0,
+        })
+        return {
+            "to": market_address,
+            "data": calldata["data"],
+            "value": "0",
+            "chain_id": 137,
+        }
+
+    async def update_market_status(
+        self,
+        market_address: str,
+        *,
+        status: str | None = None,
+        outcome: str | None = None,
+        resolved_at: str | None = None,
+    ) -> None:
+        """Update a market's status/outcome in the registry."""
+        markets = await self.get_registered_markets()
+        for m in markets:
+            if m.get("market_address", "").lower() == market_address.lower():
+                if status is not None:
+                    m["status"] = status
+                if outcome is not None:
+                    m["outcome"] = outcome
+                if resolved_at is not None:
+                    m["resolved_at"] = resolved_at
+                break
+        else:
+            raise ValueError(f"Market {market_address} not found in registry")
+
+        REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(REGISTRY_PATH, "w") as f:
+            json.dump({"markets": markets}, f, indent=2)
+        logger.info("Updated market %s: status=%s outcome=%s", market_address, status, outcome)
+

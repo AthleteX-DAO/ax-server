@@ -164,6 +164,25 @@ class DeployMarketRequest(BaseModel):
     initial_liquidity_usd: float = 1000.0
 
 
+class InitializeMarketRequest(BaseModel):
+    """Request to initialize a prediction market (admin bypass)."""
+
+    market_address: str
+
+
+class ResolveMarketRequest(BaseModel):
+    """Request to resolve a prediction market via ownerResolve."""
+
+    market_address: str
+    outcome: str  # "YES", "NO", or "SPLIT"
+
+
+class UpdateMarketStatusRequest(BaseModel):
+    """Request to update a market's registry status."""
+
+    status: str  # "active" | "paused" | "resolved" | "settled"
+
+
 class RegisterMarketRequest(BaseModel):
     """Request to register an already-deployed market."""
 
@@ -203,6 +222,9 @@ class RegisteredMarket(BaseModel):
     yes_pair_address: str | None = None
     no_pair_address: str | None = None
     registered_at: str = ""
+    status: str = "active"
+    outcome: str | None = None
+    resolved_at: str | None = None
     on_chain: MarketOnChainData | None = None
 
     model_config = {"populate_by_name": True}
