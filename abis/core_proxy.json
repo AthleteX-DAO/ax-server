@@ -114,5 +114,189 @@
         "indexed": false
       }
     ]
+  },
+  {
+    "type": "function",
+    "name": "getAccountAvailableCollateral",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      },
+      {
+        "name": "collateralType",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPositionDebt",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      },
+      {
+        "name": "poolId",
+        "type": "uint128"
+      },
+      {
+        "name": "collateralType",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "int256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPositionCollateralRatio",
+    "inputs": [
+      {
+        "name": "accountId",
+        "type": "uint128"
+      },
+      {
+        "name": "poolId",
+        "type": "uint128"
+      },
+      {
+        "name": "collateralType",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCollateralPrice",
+    "inputs": [
+      {
+        "name": "collateralType",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPreferredPool",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint128"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getApprovedPools",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint256[]"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPoolName",
+    "inputs": [{"name": "poolId", "type": "uint128"}],
+    "outputs": [{"name": "", "type": "string"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPosition",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "poolId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"}
+    ],
+    "outputs": [
+      {"name": "collateralAmount", "type": "uint256"},
+      {"name": "collateralValue", "type": "uint256"},
+      {"name": "debt", "type": "int256"},
+      {"name": "collateralizationRatio", "type": "uint256"}
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"},
+      {"name": "tokenAmount", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "withdraw",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"},
+      {"name": "tokenAmount", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "delegateCollateral",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "poolId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"},
+      {"name": "newCollateralAmountD18", "type": "uint256"},
+      {"name": "leverage", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "mintUsd",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "poolId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"},
+      {"name": "amount", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "burnUsd",
+    "inputs": [
+      {"name": "accountId", "type": "uint128"},
+      {"name": "poolId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"},
+      {"name": "amount", "type": "uint256"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   }
 ]

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../ax_dapp"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../contracts"
+		}
+	],
+	"settings": {}
+}

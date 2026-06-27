@@ -7,10 +7,9 @@ L2 (auth):   balances, buy/sell tx builders (Phase 3).
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
-from web3 import Web3
+from pydantic import BaseModel
 
-from app.deps import ChainProviderDep
+from app.deps import SynthetixClientDep
 from app.models.trading import SpotMarket, SpotPrice, SpotQuote
 
 router = APIRouter(prefix="/spot", tags=["spot"])
@@ -33,7 +32,7 @@ class PaginatedMarkets(BaseModel):
 
 @router.get("/markets", response_model=PaginatedMarkets)
 async def list_spot_markets(
-    chain: ChainProviderDep,
+    snx: SynthetixClientDep,
     cursor: int | None = Query(None, ge=0, description="Last market_id seen (start after this)"),
     limit: int = Query(20, ge=1, le=100, description="Max markets to return"),
 ):
@@ -48,27 +47,22 @@ async def list_spot_markets(
         GET /spot/markets?limit=5      → first 5 markets
         GET /spot/markets?cursor=5     → markets after ID 5
     """
-    from app.chain.synthetix import SynthetixClient
-
-    snx = SynthetixClient(chain.w3, chain._rpc_urls)
-
     start_id = (cursor + 1) if cursor is not None else 1
     markets: list[SpotMarket] = []
-    scanned = 0
     consecutive_misses = 0
     last_found_id: int | None = None
 
     for mid in range(start_id, start_id + _MAX_MARKET_SCAN):
         if len(markets) >= limit:
             break
-        scanned += 1
 
         try:
-            info = await snx.get_synth_market_info(mid)
+            name = snx.get_synth_market_name(mid)
+            synth_address = snx.get_synth_address(mid)
             markets.append(SpotMarket(
                 market_id=mid,
-                name=info.get("name", f"Synth {mid}"),
-                synth_address=info.get("synth_address", ""),
+                name=name or f"Synth {mid}",
+                synth_address=synth_address or "",
             ))
             last_found_id = mid
             consecutive_misses = 0
@@ -90,53 +84,74 @@ async def list_spot_markets(
     )
 
 
+class BatchPriceEntry(BaseModel):
+    price: str
+    timestamp: int
+
+class BatchPricesResponse(BaseModel):
+    prices: dict[str, BatchPriceEntry]
+
+@router.get("/markets/prices", response_model=BatchPricesResponse)
+async def get_batch_prices(snx: SynthetixClientDep) -> BatchPricesResponse:
+    """Get prices for all spot markets in a single call."""
+    prices = {}
+    # Try market IDs 1-15
+    for mid in range(1, 16):
+        try:
+            price = snx.get_index_price(mid)
+            timestamp = snx.w3.eth.get_block('latest')['timestamp']
+            prices[str(mid)] = BatchPriceEntry(price=str(price), timestamp=timestamp)
+        except Exception:
+            continue
+    return BatchPricesResponse(prices=prices)
+
+
 @router.get("/markets/{market_id}/price", response_model=SpotPrice)
-async def get_spot_price(market_id: int, chain: ChainProviderDep):
+async def get_spot_price(market_id: int, snx: SynthetixClientDep):
     """Current buy/sell price for a synth market."""
-    w3 = chain.w3
-    from app.chain.contracts import get_contract
-
-    spot = get_contract(w3, "0xc79eC919a0A20E29873143AB9658aF75C0b73A23", "spot_market_proxy")
-
-    # indexPrice returns (uint256 price) — 18 decimals
     try:
-        buy_price = spot.functions.indexPrice(market_id).call()
-        sell_price = buy_price  # spot buy/sell spread handled by fees
-        price_float = buy_price / 1e18
+        price_raw = snx.get_index_price(market_id)
+        price_float = price_raw / 1e18
     except Exception:
         price_float = 0.0
+
+    try:
+        timestamp = snx.w3.eth.get_block("latest")["timestamp"]
+    except Exception:
+        timestamp = 0
 
     return SpotPrice(
         market_id=market_id,
         buy_price=price_float,
-        sell_price=price_float,
-        timestamp=w3.eth.get_block("latest")["timestamp"],
+        sell_price=price_float,  # spot buy/sell spread handled by fees
+        timestamp=timestamp,
     )
 
 
 @router.get("/markets/{market_id}/quote", response_model=SpotQuote)
 async def get_spot_quote(
     market_id: int,
+    snx: SynthetixClientDep,
     side: str = Query(..., pattern="^(buy|sell)$"),
     amount: str = Query(..., description="Amount in wei"),
-    chain: ChainProviderDep = None,
 ):
     """Quote: given amount in, how much out (buy synth or sell synth)."""
-    w3 = chain.w3
-    from app.chain.contracts import get_contract
-
-    spot = get_contract(w3, "0xc79eC919a0A20E29873143AB9658aF75C0b73A23", "spot_market_proxy")
     amount_wei = int(amount)
 
     try:
         if side == "buy":
-            # quoteBuyExactIn(marketId, usdAmount) -> (synthAmount, fees)
-            result = spot.functions.quoteBuyExactIn(market_id, amount_wei).call()
-            amount_out, fees = str(result[0]), str(result[1])
+            result_amount, fees_dict = snx.quote_buy(market_id, amount_wei)
         else:
-            # quoteSellExactIn(marketId, synthAmount) -> (usdAmount, fees)
-            result = spot.functions.quoteSellExactIn(market_id, amount_wei).call()
-            amount_out, fees = str(result[0]), str(result[1])
+            result_amount, fees_dict = snx.quote_sell(market_id, amount_wei)
+
+        amount_out = str(result_amount)
+        total_fee = (
+            fees_dict["fixed_fees"]
+            + fees_dict["utilization_fees"]
+            + abs(fees_dict["skew_fees"])
+            + abs(fees_dict["wrapper_fees"])
+        )
+        fees = str(total_fee)
     except Exception:
         amount_out, fees = "0", "0"
 

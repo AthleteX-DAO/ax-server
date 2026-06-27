@@ -36,6 +36,7 @@ class ChainProvider:
         self._rpc_urls = rpc_urls
         self._instances: dict[int, Web3] = {}
         self.default_chain_id = default_chain_id
+        self._addresses = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ChainProvider:
@@ -45,7 +46,17 @@ class ChainProvider:
             8453: settings.base_rpc_url,
             42161: settings.arbitrum_rpc_url,
         }
-        return cls(rpc_urls=rpc_urls, default_chain_id=settings.default_chain_id)
+        provider = cls(rpc_urls=rpc_urls, default_chain_id=settings.default_chain_id)
+        provider._addresses = settings.addresses
+        return provider
+
+    @property
+    def addresses(self):
+        """Contract addresses for the active chain."""
+        if self._addresses is None:
+            from app.config import ChainAddresses
+            self._addresses = ChainAddresses()
+        return self._addresses
 
     def get_web3(self, chain_id: int | None = None) -> Web3:
         """Get or create a Web3 instance for the given chain.

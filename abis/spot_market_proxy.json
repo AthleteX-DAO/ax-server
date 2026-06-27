@@ -212,5 +212,123 @@
         ]
       }
     ]
+  },
+  {
+    "type": "function",
+    "name": "indexPrice",
+    "inputs": [{"name": "marketId", "type": "uint128"}],
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quoteBuyExactIn",
+    "inputs": [
+      {"name": "synthMarketId", "type": "uint128"},
+      {"name": "usdAmount", "type": "uint256"},
+      {"name": "stalenessTolerance", "type": "uint8"}
+    ],
+    "outputs": [
+      {"name": "synthAmount", "type": "uint256"},
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {"name": "fixedFees", "type": "uint256"},
+          {"name": "utilizationFees", "type": "uint256"},
+          {"name": "skewFees", "type": "int256"},
+          {"name": "wrapperFees", "type": "int256"}
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quoteSellExactIn",
+    "inputs": [
+      {"name": "marketId", "type": "uint128"},
+      {"name": "synthAmount", "type": "uint256"},
+      {"name": "stalenessTolerance", "type": "uint8"}
+    ],
+    "outputs": [
+      {"name": "returnAmount", "type": "uint256"},
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {"name": "fixedFees", "type": "uint256"},
+          {"name": "utilizationFees", "type": "uint256"},
+          {"name": "skewFees", "type": "int256"},
+          {"name": "wrapperFees", "type": "int256"}
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarketSkew",
+    "inputs": [{"name": "marketId", "type": "uint128"}],
+    "outputs": [{"name": "", "type": "int256"}],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarketFees",
+    "inputs": [{"name": "synthMarketId", "type": "uint128"}],
+    "outputs": [
+      {"name": "atomicFixedFee", "type": "uint256"},
+      {"name": "asyncFixedFee", "type": "uint256"},
+      {"name": "wrapFee", "type": "int256"},
+      {"name": "unwrapFee", "type": "int256"}
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "wrap",
+    "inputs": [
+      {"name": "marketId", "type": "uint128"},
+      {"name": "wrapAmount", "type": "uint256"},
+      {"name": "minAmountReceived", "type": "uint256"}
+    ],
+    "outputs": [
+      {"name": "amountToMint", "type": "uint256"},
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {"name": "fixedFees", "type": "uint256"},
+          {"name": "utilizationFees", "type": "uint256"},
+          {"name": "skewFees", "type": "int256"},
+          {"name": "wrapperFees", "type": "int256"}
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "unwrap",
+    "inputs": [
+      {"name": "marketId", "type": "uint128"},
+      {"name": "unwrapAmount", "type": "uint256"},
+      {"name": "minAmountReceived", "type": "uint256"}
+    ],
+    "outputs": [
+      {"name": "returnCollateralAmount", "type": "uint256"},
+      {
+        "name": "fees",
+        "type": "tuple",
+        "components": [
+          {"name": "fixedFees", "type": "uint256"},
+          {"name": "utilizationFees", "type": "uint256"},
+          {"name": "skewFees", "type": "int256"},
+          {"name": "wrapperFees", "type": "int256"}
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
   }
 ]

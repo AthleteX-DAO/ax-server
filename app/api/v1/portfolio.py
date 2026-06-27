@@ -1,7 +1,8 @@
 """Portfolio endpoints — authentication-free wallet reads.
 
-Reads on-chain balances (AX, axUSD, MATIC) and synth positions for a
-given wallet address. No private keys required — all data is public.
+Reads on-chain balances (AX, axUSD, USDC, MATIC/POL) and Synthetix V3
+account positions for a given wallet address.  No private keys required —
+all data is public.
 """
 
 from __future__ import annotations
@@ -14,11 +15,10 @@ from pydantic import BaseModel
 from web3 import Web3
 
 from app.config import get_settings
-from app.deps import ChainProviderDep
+from app.deps import SynthetixClientDep
 from app.middleware.errors import (
     APIError,
     INVALID_WALLET_ADDRESS,
-    MARKET_NOT_FOUND,
     CHAIN_ERROR,
 )
 
@@ -39,27 +39,38 @@ _ERC20_BALANCE_ABI = [
 
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
+# Known USDC addresses on Polygon
+_USDC_NATIVE = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+_USDC_BRIDGED = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+
+# Synthetix V3 pool ID for AX
+_POOL_ID = 1
+
 
 # ── Response Models ─────────────────────────────────────────────────────
 
 
-class VaultState(BaseModel):
-    """Collateral and debt state for the wallet's vault position."""
+class AccountState(BaseModel):
+    """Collateral and debt state for a single Synthetix V3 account."""
 
-    collateral_ax: str
-    collateral_usd: str
-    debt_axusd: str
+    account_id: str
+    collateral_deposited: str
+    collateral_assigned: str
+    collateral_available: str
+    debt: str
     c_ratio: str | None = None
 
 
 class BalanceResponse(BaseModel):
-    """Wallet balances for core tokens."""
+    """Wallet balances for core tokens plus Synthetix V3 accounts."""
 
     wallet: str
-    ax: str  # string for full 18-decimal precision
+    ax: str
     axusd: str
-    matic: str
-    vault: VaultState | None = None
+    usdc: str
+    matic: str  # POL native balance in wei
+    gas_price_gwei: float
+    accounts: list[AccountState]
 
 
 class Position(BaseModel):
@@ -102,30 +113,100 @@ def _read_erc20_balance(w3: Web3, token_address: str, wallet: str) -> int:
     return contract.functions.balanceOf(wallet).call()
 
 
+def _safe_usdc_balance(w3: Web3, wallet: str) -> int:
+    """Sum of native USDC + bridged USDC.e balances (both 6 decimals)."""
+    total = 0
+    for addr in (_USDC_NATIVE, _USDC_BRIDGED):
+        try:
+            total += _read_erc20_balance(w3, addr, wallet)
+        except Exception:
+            logger.debug("Could not read USDC at %s for %s", addr, wallet)
+    return total
+
+
+def _enumerate_accounts(snx, wallet: str) -> list[int]:
+    """Discover all Synthetix V3 account IDs owned by *wallet*.
+
+    1. Read the Account NFT address from the SynthetixClient.
+    2. Call balanceOf / tokenOfOwnerByIndex on the ERC-721 NFT.
+    """
+    from app.chain.contracts import get_contract
+
+    nft_address = snx.get_account_token_address()
+    nft = get_contract(snx.w3, nft_address, "account_nft")
+
+    count = nft.functions.balanceOf(wallet).call()
+    account_ids: list[int] = []
+    for i in range(count):
+        token_id = nft.functions.tokenOfOwnerByIndex(wallet, i).call()
+        account_ids.append(token_id)
+    return account_ids
+
+
+def _read_account_state(
+    snx,
+    account_id: int,
+    collateral_type: str,
+    pool_id: int,
+) -> AccountState:
+    """Read collateral / debt / c-ratio for a single account."""
+    # getAccountCollateral → (totalDeposited, totalAssigned, totalLocked)
+    deposited, assigned, _locked = snx.get_account_collateral(
+        account_id, collateral_type
+    )
+
+    # Available collateral (withdrawable)
+    available = snx.get_available_collateral(account_id, collateral_type)
+
+    # Debt
+    debt = snx.get_position_debt(account_id, pool_id, collateral_type)
+
+    # C-ratio (on-chain returns 0 when no debt)
+    c_ratio_raw: str | None = None
+    try:
+        cr = snx.get_position_c_ratio(
+            account_id, pool_id, collateral_type
+        )
+        if cr > 0:
+            c_ratio_raw = str(cr)
+    except Exception:
+        pass
+
+    return AccountState(
+        account_id=str(account_id),
+        collateral_deposited=str(deposited),
+        collateral_assigned=str(assigned),
+        collateral_available=str(available),
+        debt=str(debt),
+        c_ratio=c_ratio_raw,
+    )
+
+
 # ── Endpoints ───────────────────────────────────────────────────────────
 
 
 @router.get("/balance", response_model=BalanceResponse)
 async def get_wallet_balance(
-    chain: ChainProviderDep,
+    snx: SynthetixClientDep,
     wallet: str = Query(..., description="Wallet address (0x...)"),
 ) -> BalanceResponse:
-    """Return AX, axUSD, and MATIC balances for a wallet.
-
-    Also returns vault state (collateral + debt) if the wallet has an
-    active Synthetix V3 vault position.
-    """
+    """Return AX, axUSD, USDC, MATIC balances and Synthetix V3 accounts."""
     wallet = _validate_wallet(wallet)
     settings = get_settings()
-    w3 = chain.w3
+    w3 = snx.w3
 
     try:
-        # Native MATIC balance
+        # Native POL / MATIC balance
         matic_raw = w3.eth.get_balance(wallet)
 
         # ERC-20 balances
         ax_raw = _read_erc20_balance(w3, settings.addresses.ax_token, wallet)
         axusd_raw = _read_erc20_balance(w3, settings.addresses.usd_proxy, wallet)
+        usdc_raw = _safe_usdc_balance(w3, wallet)
+
+        # Gas price
+        gas_price_wei = w3.eth.gas_price
+        gas_price_gwei = round(gas_price_wei / 1e9, 4)
     except Exception as exc:
         logger.exception("Failed to read balances for %s", wallet)
         raise APIError(
@@ -135,56 +216,38 @@ async def get_wallet_balance(
             details=str(exc),
         ) from exc
 
-    # Attempt to read vault state from CoreProxy
-    vault: VaultState | None = None
+    # Enumerate Synthetix V3 accounts and read state for each
+    accounts: list[AccountState] = []
     try:
-        from app.chain.contracts import get_contract
+        account_ids = _enumerate_accounts(snx, wallet)
 
-        core = get_contract(w3, settings.addresses.core_proxy, "core_proxy")
-        # Try to read account collateral for account 1 (simplified)
-        # Full implementation would enumerate accounts owned by wallet
-        collateral_result = core.functions.getAccountCollateral(
-            1, Web3.to_checksum_address(settings.addresses.ax_token)
-        ).call()
-        deposited = collateral_result[0]
-
-        # Get collateral price
-        collateral_price = core.functions.getCollateralPrice(
-            Web3.to_checksum_address(settings.addresses.ax_token)
-        ).call()
-        collateral_usd = deposited * collateral_price // (10**18)
-
-        # Get debt
-        debt_raw = core.functions.getPositionDebt(
-            1, 1, Web3.to_checksum_address(settings.addresses.ax_token)
-        ).call()
-
-        c_ratio: str | None = None
-        if debt_raw > 0:
-            c_ratio = str(round(collateral_usd / debt_raw, 4))
-
-        vault = VaultState(
-            collateral_ax=str(deposited),
-            collateral_usd=str(collateral_usd),
-            debt_axusd=str(debt_raw),
-            c_ratio=c_ratio,
-        )
+        for aid in account_ids:
+            try:
+                state = _read_account_state(
+                    snx, aid, settings.addresses.ax_token, _POOL_ID
+                )
+                accounts.append(state)
+            except Exception:
+                logger.debug(
+                    "Could not read state for account %d of %s", aid, wallet
+                )
     except Exception:
-        # Wallet may not have a vault position — this is fine
-        logger.debug("No vault position for %s (or read failed)", wallet)
+        logger.debug("No Synthetix V3 accounts for %s (or read failed)", wallet)
 
     return BalanceResponse(
         wallet=wallet,
         ax=str(ax_raw),
         axusd=str(axusd_raw),
+        usdc=str(usdc_raw),
         matic=str(matic_raw),
-        vault=vault,
+        gas_price_gwei=gas_price_gwei,
+        accounts=accounts,
     )
 
 
 @router.get("/positions", response_model=PositionsResponse)
 async def get_wallet_positions(
-    chain: ChainProviderDep,
+    snx: SynthetixClientDep,
     wallet: str = Query(..., description="Wallet address (0x...)"),
 ) -> PositionsResponse:
     """Return synth token balances for each spot market.
@@ -193,26 +256,18 @@ async def get_wallet_positions(
     synth token.
     """
     wallet = _validate_wallet(wallet)
-    settings = get_settings()
-    w3 = chain.w3
+    w3 = snx.w3
 
     positions: list[Position] = []
 
     try:
-        from app.chain.contracts import get_contract
-
-        spot = get_contract(
-            w3, settings.addresses.spot_market_proxy, "spot_market_proxy"
-        )
-
         # Known market IDs — mirrors spot.py
         # TODO: read dynamically from on-chain registry
         known_ids = [1, 2, 3, 4, 5]
 
         for mid in known_ids:
             try:
-                # getSynth(uint128 marketId) → address
-                synth_address = spot.functions.getSynth(mid).call()
+                synth_address = snx.get_synth_address(mid)
                 synth_address = Web3.to_checksum_address(synth_address)
 
                 balance = _read_erc20_balance(w3, synth_address, wallet)
@@ -222,7 +277,7 @@ async def get_wallet_positions(
                 # Try to get a human-readable name
                 symbol = f"sAX-{mid}"
                 try:
-                    name_result = spot.functions.name(mid).call()
+                    name_result = snx.get_synth_market_name(mid)
                     if name_result:
                         symbol = name_result
                 except Exception:
@@ -231,7 +286,7 @@ async def get_wallet_positions(
                 # Try to price the position
                 value_usd: str | None = None
                 try:
-                    price = spot.functions.indexPrice(mid).call()
+                    price = snx.get_index_price(mid)
                     value_usd = str(balance * price // (10**18))
                 except Exception:
                     pass
