@@ -18,6 +18,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.history import router as history_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.predict_orders import router as predict_orders_router
+from app.api.v1.comments import router as comments_router
 
 v1_router = APIRouter(prefix="/api/v1", tags=["v1"])
 
@@ -49,3 +50,6 @@ v1_router.include_router(admin_router)
 
 # Prediction order builders (Phase 3)
 v1_router.include_router(predict_orders_router)
+
+# Comments
+v1_router.include_router(comments_router)

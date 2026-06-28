@@ -235,3 +235,17 @@ class DeployMarketResponse(BaseModel):
 
     status: str
     market: RegisteredMarket
+
+
+# ── Comments ────────────────────────────────────────────────────────────
+
+class Comment(BaseModel):
+    id: str
+    market_id: int
+    wallet: str
+    text: str
+    timestamp: str
+    display_name: str | None = None
+
+class CreateCommentRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=500)
