@@ -10,11 +10,22 @@ import math
 import random
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.models.trading import PredictMarket, PredictPrice, PriceHistory, PricePoint
 
 router = APIRouter(prefix="/predict", tags=["predict"])
+
+
+def get_chain_provider_optional():
+    """Return ChainProvider or None if unavailable."""
+    try:
+        from app.deps import get_settings
+        from app.chain.provider import ChainProvider
+        settings = get_settings()
+        return ChainProvider.from_settings(settings)
+    except Exception:
+        return None
 
 # ── Seed data ────────────────────────────────────────────────────────────
 # Migrated from ax_dapp GetPredictionMarketDataUseCase._buildMockPredictionMarkets
@@ -176,23 +187,88 @@ async def list_prediction_markets(
 
 
 @router.get("/markets/{market_id}", response_model=PredictMarket)
-async def get_prediction_market(market_id: int, request: Request = None):
+async def get_prediction_market(
+    market_id: int,
+    request: Request = None,
+    chain: object = Depends(get_chain_provider_optional),
+):
     """Get single prediction market by numeric ID."""
     for m in _get_markets():
         if m.id == market_id:
+            updates = {}
+
+            # Try to get live prices from LP pools for deployed markets
+            try:
+                from app.chain.prediction_deployer import PredictionDeployer
+                import json
+                from pathlib import Path
+
+                registry_path = Path(__file__).resolve().parents[3] / "data" / "markets_registry.json"
+                if registry_path.exists():
+                    registry = json.loads(registry_path.read_text())
+                    for rm in registry.get("markets", []):
+                        if rm.get("id") == market_id and rm.get("yes_pair_address") and rm.get("no_pair_address"):
+                            w3 = chain.w3 if chain else None
+                            if w3:
+                                from app.chain.contracts import get_contract
+                                # Get YES pair reserves
+                                yes_pair = get_contract(w3, rm["yes_pair_address"], "uniswap_v2_pair")
+                                yes_reserves = yes_pair.functions.getReserves().call()
+                                yes_token0 = yes_pair.functions.token0().call()
+
+                                # Determine which reserve is the YES token vs axUSD
+                                if yes_token0.lower() == rm["yes_token"].lower():
+                                    yes_token_reserve, yes_usd_reserve = yes_reserves[0], yes_reserves[1]
+                                else:
+                                    yes_usd_reserve, yes_token_reserve = yes_reserves[0], yes_reserves[1]
+
+                                if yes_token_reserve > 0:
+                                    yes_price = round(yes_usd_reserve / yes_token_reserve, 4)
+                                    updates["yes_price"] = min(yes_price, 1.0)
+                                    updates["no_price"] = round(1 - updates["yes_price"], 4)
+
+                                # Also try NO pair for more accurate NO price
+                                try:
+                                    no_pair = get_contract(w3, rm["no_pair_address"], "uniswap_v2_pair")
+                                    no_reserves = no_pair.functions.getReserves().call()
+                                    no_token0 = no_pair.functions.token0().call()
+
+                                    if no_token0.lower() == rm["no_token"].lower():
+                                        no_token_reserve, no_usd_reserve = no_reserves[0], no_reserves[1]
+                                    else:
+                                        no_usd_reserve, no_token_reserve = no_reserves[0], no_reserves[1]
+
+                                    if no_token_reserve > 0:
+                                        no_price = round(no_usd_reserve / no_token_reserve, 4)
+                                        updates["no_price"] = min(no_price, 1.0)
+                                        # Re-derive yes_price for consistency
+                                        if "yes_price" in updates:
+                                            total = updates["yes_price"] + updates["no_price"]
+                                            if total > 0:
+                                                updates["yes_price"] = round(updates["yes_price"] / total, 4)
+                                                updates["no_price"] = round(updates["no_price"] / total, 4)
+                                except Exception:
+                                    pass  # Use YES-derived NO price
+                            break
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"LP price fetch failed: {e}")
+
             # Try to get real 24h volume from QuestDB
             questdb = getattr(request.app.state, "questdb", None) if request else None
             if questdb is not None:
                 try:
                     volumes = await questdb.get_24h_volume("predict")
-                    # Sum YES + NO volumes for this market
                     yes_vol = volumes.get("axUSD-YES", 0) + volumes.get("YES-axUSD", 0)
                     no_vol = volumes.get("axUSD-NO", 0) + volumes.get("NO-axUSD", 0)
                     real_volume = yes_vol + no_vol
                     if real_volume > 0:
-                        m = m.model_copy(update={"trading_volume": round(real_volume, 2)})
+                        updates["trading_volume"] = round(real_volume, 2)
                 except Exception:
-                    pass  # Fall back to seed volume
+                    pass
+
+            if updates:
+                m = m.model_copy(update=updates)
             return m
     raise HTTPException(status_code=404, detail="Market not found")
 
