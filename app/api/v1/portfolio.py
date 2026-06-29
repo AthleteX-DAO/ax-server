@@ -70,6 +70,10 @@ class BalanceResponse(BaseModel):
     usdc: str
     matic: str  # POL native balance in wei
     gas_price_gwei: float
+    unrealized_return_usd: str = "0.0"
+    unrealized_return_pct: str = "0.0"
+    change_24h_usd: str = "0.0"
+    change_24h_pct: str = "NaN"
     accounts: list[AccountState]
 
 

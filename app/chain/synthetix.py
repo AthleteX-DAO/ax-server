@@ -177,6 +177,15 @@ class SynthetixClient:
 
     # ── Core Protocol — Writes (return unsigned tx dicts) ─────────
 
+    def build_create_account_tx(self) -> dict[str, Any]:
+        """Build unsigned createAccount transaction."""
+        return {
+            "to": self.addresses.core_proxy,
+            "data": self.core.functions.createAccount()._encode_transaction_data(),
+            "value": "0",
+            "chain_id": self.w3.eth.chain_id,
+        }
+
     def build_deposit_tx(
         self, account_id: int, collateral_type: str, amount: int
     ) -> dict[str, Any]:
@@ -214,6 +223,25 @@ class SynthetixClient:
         leverage: int = 1 * 10**18,
     ) -> dict[str, Any]:
         """Build unsigned delegateCollateral transaction."""
+        ct = Web3.to_checksum_address(collateral_type)
+        return {
+            "to": self.addresses.core_proxy,
+            "data": self.core.functions.delegateCollateral(
+                account_id, pool_id, ct, amount, leverage
+            )._encode_transaction_data(),
+            "value": "0",
+            "chain_id": self.w3.eth.chain_id,
+        }
+
+    def build_undelegate_tx(
+        self,
+        account_id: int,
+        pool_id: int,
+        collateral_type: str,
+        amount: int,
+        leverage: int = 1 * 10**18,
+    ) -> dict[str, Any]:
+        """Build unsigned undelegate transaction (which is just delegateCollateral with a new amount)."""
         ct = Web3.to_checksum_address(collateral_type)
         return {
             "to": self.addresses.core_proxy,
