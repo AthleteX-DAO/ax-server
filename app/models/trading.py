@@ -108,9 +108,53 @@ class PredictApproveRequest(BaseModel):
     amount: str
 
 class PredictCreateRequest(BaseModel):
-    wallet: str
-    market_address: str
+    wallet: str = Field(..., description="Wallet address")
+    market_id: int
+    long_amount: str
+    short_amount: str
+
+
+# ── Portfolio ───────────────────────────────────────────────────────────
+
+class PortfolioApproveRequest(BaseModel):
+    tokenAddress: str
+    spender: str
     amount: str
+    wallet: str
+
+class PortfolioDepositRequest(BaseModel):
+    accountId: str
+    collateralType: str
+    amount: str
+    wallet: str
+
+class PortfolioWithdrawRequest(BaseModel):
+    accountId: str
+    collateralType: str
+    amount: str
+    wallet: str
+
+class PortfolioDelegateRequest(BaseModel):
+    accountId: str
+    poolId: int
+    collateralType: str
+    amount: str
+    wallet: str
+
+class PortfolioCreateAccountRequest(BaseModel):
+    wallet: str
+
+class PortfolioMintRequest(BaseModel):
+    accountId: str
+    poolId: int
+    collateralType: str
+    amount: str
+    wallet: str
+
+class PortfolioWrapRequest(BaseModel):
+    marketId: int
+    wrapAmount: str
+    wallet: str
 
 
 class PredictMarket(BaseModel):

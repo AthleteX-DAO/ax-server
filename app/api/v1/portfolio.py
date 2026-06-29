@@ -90,6 +90,61 @@ class PositionsResponse(BaseModel):
     positions: list[Position]
 
 
+class UnsignedTxResponse(BaseModel):
+    """Returned unsigned transaction ready for MetaMask / wallet signing."""
+
+    to: str
+    data: str
+    value: str
+    chain_id: int
+
+
+class BuildApproveRequest(BaseModel):
+    token_address: str
+    spender: str
+    amount: str
+    wallet: str
+
+
+class BuildDepositRequest(BaseModel):
+    account_id: int
+    collateral_type: str
+    amount: str
+    wallet: str
+
+
+class BuildWithdrawRequest(BaseModel):
+    account_id: int
+    collateral_type: str
+    amount: str
+    wallet: str
+
+
+class BuildDelegateRequest(BaseModel):
+    account_id: int
+    pool_id: int
+    collateral_type: str
+    amount: str
+    wallet: str
+
+
+class BuildCreateAccountRequest(BaseModel):
+    wallet: str
+
+
+class BuildMintUsdRequest(BaseModel):
+    account_id: int
+    pool_id: int
+    collateral_type: str
+    amount: str
+    wallet: str
+
+
+class BuildWrapRequest(BaseModel):
+    market_id: int
+    wrap_amount: str
+    wallet: str
+
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 
@@ -314,3 +369,121 @@ async def get_wallet_positions(
         ) from exc
 
     return PositionsResponse(wallet=wallet, positions=positions)
+
+
+# ── Transaction Builders ────────────────────────────────────────────────
+
+@router.post("/build-approve", response_model=UnsignedTxResponse)
+async def build_approve(
+    req: BuildApproveRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    w3 = snx.w3
+    spender_addr = Web3.to_checksum_address(req.spender)
+    token_addr = Web3.to_checksum_address(req.token_address)
+    
+    # Generic ERC20 ABI for approve
+    abi = [
+        {
+            "constant": False,
+            "inputs": [
+                {"name": "_spender", "type": "address"},
+                {"name": "_value", "type": "uint256"}
+            ],
+            "name": "approve",
+            "outputs": [{"name": "", "type": "bool"}],
+            "type": "function"
+        }
+    ]
+    contract = w3.eth.contract(address=token_addr, abi=abi)
+    amount_wei = int(req.amount)
+    
+    data = contract.functions.approve(spender_addr, amount_wei)._encode_transaction_data()
+    return UnsignedTxResponse(
+        to=token_addr,
+        data=data,
+        value="0",
+        chain_id=w3.eth.chain_id,
+    )
+
+
+@router.post("/build-deposit", response_model=UnsignedTxResponse)
+async def build_deposit(
+    req: BuildDepositRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_deposit_tx(
+        account_id=req.account_id,
+        collateral_type=req.collateral_type,
+        amount=int(req.amount),
+    )
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-withdraw", response_model=UnsignedTxResponse)
+async def build_withdraw(
+    req: BuildWithdrawRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_withdraw_tx(
+        account_id=req.account_id,
+        collateral_type=req.collateral_type,
+        amount=int(req.amount),
+    )
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-delegate", response_model=UnsignedTxResponse)
+async def build_delegate(
+    req: BuildDelegateRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_delegate_tx(
+        account_id=req.account_id,
+        pool_id=req.pool_id,
+        collateral_type=req.collateral_type,
+        amount=int(req.amount),
+    )
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-undelegate", response_model=UnsignedTxResponse)
+async def build_undelegate(
+    req: BuildDelegateRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_undelegate_tx(
+        account_id=req.account_id,
+        pool_id=req.pool_id,
+        collateral_type=req.collateral_type,
+        amount=int(req.amount),
+    )
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-create-account", response_model=UnsignedTxResponse)
+async def build_create_account(
+    req: BuildCreateAccountRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_create_account_tx()
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-mint", response_model=UnsignedTxResponse)
+async def build_mint(
+    req: BuildMintUsdRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_mint_usd_tx(
+        account_id=req.account_id,
+        pool_id=req.pool_id,
+        collateral_type=req.collateral_type,
+        amount=int(req.amount),
+    )
+    return UnsignedTxResponse(**tx)
+
+
+@router.post("/build-wrap", response_model=UnsignedTxResponse)
+async def build_wrap(
+    req: BuildWrapRequest, snx: SynthetixClientDep
+) -> UnsignedTxResponse:
+    tx = snx.build_wrap_tx(
+        market_id=req.market_id,
+        wrap_amount=int(req.wrap_amount),
+    )
+    return UnsignedTxResponse(**tx)
+
