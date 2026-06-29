@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     dex_subgraph_url: str = "https://api.studio.thegraph.com/query/1743457/athletex-dex/v0.0.1"
 
     # ── Ingest Worker ─────────────────────────────────────────────
-    ingest_poll_interval: int = 30   # seconds between poll cycles
+    ingest_poll_interval: int = 300   # seconds between poll cycles
     ingest_backfill_days: int = 30   # days to backfill on first run
     ingest_enabled: bool = True      # set False to disable background ingestion
 

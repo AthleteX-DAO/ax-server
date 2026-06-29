@@ -23,6 +23,7 @@ from app.middleware.errors import (
     CHAIN_ERROR,
     CONTRACT_REVERT,
 )
+from app.chain.eip7412 import try_resolve_eip7412
 
 logger = logging.getLogger("ax-server.orders")
 
@@ -181,11 +182,21 @@ async def build_buy_transaction(
             gas_estimate = snx.w3.eth.estimate_gas(
                 {"from": wallet, "to": tx_data["to"], "data": tx_data["data"], "value": 0}
             )
-        except Exception:
-            logger.debug("Gas estimation failed for buy")
-            gas_estimate = None
+        except Exception as e:
+            resolved_tx = try_resolve_eip7412(snx.w3, e, tx_data)
+            if resolved_tx:
+                tx_data = resolved_tx
+                try:
+                    gas_estimate = snx.w3.eth.estimate_gas(
+                        {"from": wallet, "to": tx_data["to"], "data": tx_data["data"], "value": int(tx_data["value"])}
+                    )
+                except Exception:
+                    logger.debug("Gas estimation failed for resolved multicall buy")
+            else:
+                logger.debug("Gas estimation failed for buy")
+        
         return UnsignedTransaction(
-            to=tx_data["to"], data=tx_data["data"], value="0",
+            to=tx_data["to"], data=tx_data["data"], value=tx_data.get("value", "0"),
             gas_estimate=gas_estimate, chain_id=tx_data["chain_id"],
         )
     except APIError:
@@ -215,11 +226,21 @@ async def build_sell_transaction(
             gas_estimate = snx.w3.eth.estimate_gas(
                 {"from": wallet, "to": tx_data["to"], "data": tx_data["data"], "value": 0}
             )
-        except Exception:
-            logger.debug("Gas estimation failed for sell")
-            gas_estimate = None
+        except Exception as e:
+            resolved_tx = try_resolve_eip7412(snx.w3, e, tx_data)
+            if resolved_tx:
+                tx_data = resolved_tx
+                try:
+                    gas_estimate = snx.w3.eth.estimate_gas(
+                        {"from": wallet, "to": tx_data["to"], "data": tx_data["data"], "value": int(tx_data["value"])}
+                    )
+                except Exception:
+                    logger.debug("Gas estimation failed for resolved multicall sell")
+            else:
+                logger.debug("Gas estimation failed for sell")
+                
         return UnsignedTransaction(
-            to=tx_data["to"], data=tx_data["data"], value="0",
+            to=tx_data["to"], data=tx_data["data"], value=tx_data.get("value", "0"),
             gas_estimate=gas_estimate, chain_id=tx_data["chain_id"],
         )
     except APIError:

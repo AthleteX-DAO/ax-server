@@ -321,6 +321,36 @@ class QuestDBClient:
             result[mid] = vol
         return result
 
+    async def get_volume_stats_by_pair(self, market_type: str = "predict") -> dict[str, dict[str, float]]:
+        """Get 24-hour and lifetime trading volume grouped by pair_address.
+
+        Returns a dict mapping pair_address → {"24h": volume_usd, "lifetime": volume_usd}.
+        """
+        pool = await self._get_pool()
+
+        query = """
+            SELECT
+                pair_address,
+                sum(case when ts >= dateadd('d', -1, now()) then amount_usd else 0 end) AS vol_24h,
+                sum(amount_usd) AS vol_lifetime
+            FROM trades
+            WHERE market_type = $1
+            GROUP BY pair_address;
+        """
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, market_type)
+
+        result: dict[str, dict[str, float]] = {}
+        for r in rows:
+            pair = r["pair_address"]
+            if not pair:
+                continue
+            vol_24h = r["vol_24h"] or 0.0
+            vol_lifetime = r["vol_lifetime"] or 0.0
+            result[pair.lower()] = {"24h": vol_24h, "lifetime": vol_lifetime}
+        return result
+
     async def get_latest_price(self, market_id: str) -> dict[str, Any] | None:
         """Get the most recent price for a market via ``LATEST ON``.
 

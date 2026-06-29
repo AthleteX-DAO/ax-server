@@ -61,6 +61,25 @@ class Pool(BaseModel):
     collateral_types: list[str] = Field(default_factory=list)
 
 
+class PlatformTVL(BaseModel):
+    tvl: float
+
+
+class VaultData(BaseModel):
+    symbol: str
+    balance: float
+    tvl: float
+    apy: float
+    vaultAddress: str
+    collateralAddress: str
+    poolId: int
+    timestamp: str
+
+
+class AccountIdResponse(BaseModel):
+    account_id: str | None
+
+
 class AccountCollateral(BaseModel):
     account_id: int
     collateral_token: str
@@ -83,6 +102,17 @@ class CollateralPrice(BaseModel):
 
 # ── Prediction ──────────────────────────────────────────────────────────
 
+class PredictApproveRequest(BaseModel):
+    wallet: str
+    market_address: str
+    amount: str
+
+class PredictCreateRequest(BaseModel):
+    wallet: str
+    market_address: str
+    amount: str
+
+
 class PredictMarket(BaseModel):
     """Full prediction market payload consumed by the Flutter frontend."""
 
@@ -97,6 +127,7 @@ class PredictMarket(BaseModel):
     yes_price: float = 0.50
     no_price: float = 0.50
     trading_volume: float = 0.0
+    lifetime_volume: float = 0.0
     end_date: str = ""
     category: str = ""
     resolved: bool | None = None

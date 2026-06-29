@@ -12,7 +12,19 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.models.trading import PredictMarket, PredictPrice, PriceHistory, PricePoint
+from app.models.trading import (
+    Comment,
+    CreateCommentRequest,
+    PredictMarket,
+    PredictPosition,
+    PredictPrice,
+    PriceHistory,
+    PricePoint,
+    TxResponse,
+    UnsignedTx,
+    PredictApproveRequest,
+    PredictCreateRequest,
+)
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
@@ -116,20 +128,14 @@ _MARKETS: list[dict] = [
 ]
 
 
-def _seed_price(prompt: str) -> float:
-    """Deterministic YES price derived from the prompt string hash."""
-    rng = random.Random(hash(prompt))
-    return round(0.25 + rng.random() * 0.5, 4)
-
-
 def _build_markets() -> list[PredictMarket]:
-    """Build the full list of PredictMarket objects with seeded prices."""
+    """Build the full list of PredictMarket objects with default values."""
     results: list[PredictMarket] = []
     for m in _MARKETS:
-        yes_price = _seed_price(m["prompt"])
-        no_price = round(1 - yes_price, 4)
-        rng = random.Random(hash(m["prompt"]))
-        volume = round(500_000 + rng.random() * 4_500_000, 2)
+        yes_price = 0.50
+        no_price = 0.50
+        volume = 0.0
+        lifetime_volume = 0.0
 
         mid = m["id"]
 
@@ -154,6 +160,7 @@ def _build_markets() -> list[PredictMarket]:
                 yes_price=yes_price,
                 no_price=no_price,
                 trading_volume=volume,
+                lifetime_volume=lifetime_volume,
                 end_date=m["end_date"],
                 category=m["category"],
             )
@@ -175,15 +182,200 @@ def _get_markets() -> list[PredictMarket]:
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 
+import json
+from pathlib import Path
+
+def _load_registry() -> list[dict]:
+    registry_path = Path(__file__).resolve().parents[3] / "data" / "markets_registry.json"
+    if not registry_path.exists():
+        return []
+    import json
+    try:
+        return json.loads(registry_path.read_text()).get("markets", [])
+    except Exception:
+        return []
+
+@router.post("/build-approve", response_model=TxResponse)
+async def build_predict_approve(
+    req: PredictApproveRequest,
+    chain: object = Depends(get_chain_provider_optional),
+):
+    """Build unsigned approve transaction for axUSD spend in a predict market."""
+    if not chain:
+        raise HTTPException(500, "Chain provider unavailable")
+    
+    # Typical axUSD address for predict
+    axUsdAddress = "0x1Ea27b8fa8D9Fb4370Dd654ffFad4734D0960fA6"
+    
+    from web3 import Web3
+    
+    # simple ERC20 ABI for approve
+    erc20_abi = [
+        {
+            "constant": False,
+            "inputs": [
+                {"name": "_spender", "type": "address"},
+                {"name": "_value", "type": "uint256"}
+            ],
+            "name": "approve",
+            "outputs": [{"name": "", "type": "bool"}],
+            "type": "function"
+        }
+    ]
+    
+    contract = chain.w3.eth.contract(address=Web3.to_checksum_address(axUsdAddress), abi=erc20_abi)
+    amount_wei = int(req.amount)
+    
+    # estimate gas?
+    tx_data = contract.encodeABI(fn_name="approve", args=[Web3.to_checksum_address(req.market_address), amount_wei])
+    
+    return TxResponse(
+        transaction=UnsignedTx(
+            to=axUsdAddress,
+            data=tx_data,
+            value="0",
+            chain_id=chain.w3.eth.chain_id,
+        )
+    )
+
+
+@router.post("/build-create", response_model=TxResponse)
+async def build_predict_create(
+    req: PredictCreateRequest,
+    chain: object = Depends(get_chain_provider_optional),
+):
+    """Build unsigned create transaction for a predict market."""
+    if not chain:
+        raise HTTPException(500, "Chain provider unavailable")
+    
+    from web3 import Web3
+    
+    market_abi = [
+        {
+            "inputs": [{"internalType": "uint256", "name": "tokensToCreate", "type": "uint256"}],
+            "name": "create",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }
+    ]
+    
+    contract = chain.w3.eth.contract(address=Web3.to_checksum_address(req.market_address), abi=market_abi)
+    amount_wei = int(req.amount)
+    
+    tx_data = contract.encodeABI(fn_name="create", args=[amount_wei])
+    
+    return TxResponse(
+        transaction=UnsignedTx(
+            to=req.market_address,
+            data=tx_data,
+            value="0",
+            chain_id=chain.w3.eth.chain_id,
+        )
+    )
+
+async def _enrich_markets(markets: list[PredictMarket], request: Request) -> list[PredictMarket]:
+    volumes = {}
+    if request and hasattr(request.app.state, "questdb") and request.app.state.questdb is not None:
+        try:
+            volumes = await request.app.state.questdb.get_volume_stats_by_pair("predict")
+        except Exception:
+            pass
+
+    registry = _load_registry()
+
+    enriched = []
+    
+    # Try to get chain from request
+    chain = None
+    if request:
+        try:
+            from app.api.v1.predict import get_chain_provider_optional
+            chain = get_chain_provider_optional(request)
+        except Exception:
+            pass
+
+    w3 = chain.w3 if chain else None
+    if w3:
+        from app.chain.contracts import get_contract
+
+    for m in markets:
+        updates = {}
+        rm = next((x for x in registry if x.get("market_address", "").lower() == m.market_address.lower()), None)
+        
+        if rm and rm.get("yes_pair_address") and rm.get("no_pair_address"):
+            yes_pair_addr = rm["yes_pair_address"].lower()
+            no_pair_addr = rm["no_pair_address"].lower()
+            
+            # 1. Volume Enrichment
+            yes_stats = volumes.get(yes_pair_addr, {"24h": 0.0, "lifetime": 0.0})
+            no_stats = volumes.get(no_pair_addr, {"24h": 0.0, "lifetime": 0.0})
+            
+            vol_24h = yes_stats["24h"] + no_stats["24h"]
+            vol_lifetime = yes_stats["lifetime"] + no_stats["lifetime"]
+            
+            updates["trading_volume"] = round(vol_24h, 2)
+            updates["lifetime_volume"] = round(vol_lifetime, 2)
+            
+            # 2. Price Enrichment (On-chain)
+            if w3:
+                try:
+                    yes_pair = get_contract(w3, rm["yes_pair_address"], "uniswap_v2_pair")
+                    yes_reserves = yes_pair.functions.getReserves().call()
+                    yes_token0 = yes_pair.functions.token0().call()
+
+                    if yes_token0.lower() == rm["yes_token"].lower():
+                        yes_token_reserve, yes_usd_reserve = yes_reserves[0], yes_reserves[1]
+                    else:
+                        yes_usd_reserve, yes_token_reserve = yes_reserves[0], yes_reserves[1]
+
+                    if yes_token_reserve > 0:
+                        yes_price = round(yes_usd_reserve / yes_token_reserve, 4)
+                        updates["yes_price"] = yes_price
+                        updates["no_price"] = round(1 - yes_price, 4) if yes_price < 1.0 else 0.0
+
+                    try:
+                        no_pair = get_contract(w3, rm["no_pair_address"], "uniswap_v2_pair")
+                        no_reserves = no_pair.functions.getReserves().call()
+                        no_token0 = no_pair.functions.token0().call()
+
+                        if no_token0.lower() == rm["no_token"].lower():
+                            no_token_reserve, no_usd_reserve = no_reserves[0], no_reserves[1]
+                        else:
+                            no_usd_reserve, no_token_reserve = no_reserves[0], no_reserves[1]
+
+                        if no_token_reserve > 0:
+                            no_price = round(no_usd_reserve / no_token_reserve, 4)
+                            updates["no_price"] = no_price
+                            
+                            if "yes_price" in updates:
+                                total = updates["yes_price"] + updates["no_price"]
+                                if total > 0:
+                                    updates["yes_price"] = round(updates["yes_price"] / total, 4)
+                                    updates["no_price"] = round(updates["no_price"] / total, 4)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).debug(f"LP price fetch failed for {m.market_address}: {e}")
+
+        if updates:
+            enriched.append(m.model_copy(update=updates))
+        else:
+            enriched.append(m)
+            
+    return enriched
+
 @router.get("/markets", response_model=list[PredictMarket])
 async def list_prediction_markets(
+    request: Request,
     category: Optional[str] = Query(None, description="Filter by category"),
 ):
     """List all prediction markets, optionally filtered by category."""
     markets = _get_markets()
     if category:
         markets = [m for m in markets if m.category == category.lower()]
-    return markets
+    return await _enrich_markets(markets, request)
 
 
 @router.get("/markets/{market_id}", response_model=PredictMarket)
@@ -197,79 +389,10 @@ async def get_prediction_market(
         if m.id == market_id:
             updates = {}
 
-            # Try to get live prices from LP pools for deployed markets
-            try:
-                from app.chain.prediction_deployer import PredictionDeployer
-                import json
-                from pathlib import Path
-
-                registry_path = Path(__file__).resolve().parents[3] / "data" / "markets_registry.json"
-                if registry_path.exists():
-                    registry = json.loads(registry_path.read_text())
-                    for rm in registry.get("markets", []):
-                        if rm.get("id") == market_id and rm.get("yes_pair_address") and rm.get("no_pair_address"):
-                            w3 = chain.w3 if chain else None
-                            if w3:
-                                from app.chain.contracts import get_contract
-                                # Get YES pair reserves
-                                yes_pair = get_contract(w3, rm["yes_pair_address"], "uniswap_v2_pair")
-                                yes_reserves = yes_pair.functions.getReserves().call()
-                                yes_token0 = yes_pair.functions.token0().call()
-
-                                # Determine which reserve is the YES token vs axUSD
-                                if yes_token0.lower() == rm["yes_token"].lower():
-                                    yes_token_reserve, yes_usd_reserve = yes_reserves[0], yes_reserves[1]
-                                else:
-                                    yes_usd_reserve, yes_token_reserve = yes_reserves[0], yes_reserves[1]
-
-                                if yes_token_reserve > 0:
-                                    yes_price = round(yes_usd_reserve / yes_token_reserve, 4)
-                                    updates["yes_price"] = min(yes_price, 1.0)
-                                    updates["no_price"] = round(1 - updates["yes_price"], 4)
-
-                                # Also try NO pair for more accurate NO price
-                                try:
-                                    no_pair = get_contract(w3, rm["no_pair_address"], "uniswap_v2_pair")
-                                    no_reserves = no_pair.functions.getReserves().call()
-                                    no_token0 = no_pair.functions.token0().call()
-
-                                    if no_token0.lower() == rm["no_token"].lower():
-                                        no_token_reserve, no_usd_reserve = no_reserves[0], no_reserves[1]
-                                    else:
-                                        no_usd_reserve, no_token_reserve = no_reserves[0], no_reserves[1]
-
-                                    if no_token_reserve > 0:
-                                        no_price = round(no_usd_reserve / no_token_reserve, 4)
-                                        updates["no_price"] = min(no_price, 1.0)
-                                        # Re-derive yes_price for consistency
-                                        if "yes_price" in updates:
-                                            total = updates["yes_price"] + updates["no_price"]
-                                            if total > 0:
-                                                updates["yes_price"] = round(updates["yes_price"] / total, 4)
-                                                updates["no_price"] = round(updates["no_price"] / total, 4)
-                                except Exception:
-                                    pass  # Use YES-derived NO price
-                            break
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug(f"LP price fetch failed: {e}")
-
-            # Try to get real 24h volume from QuestDB
-            questdb = getattr(request.app.state, "questdb", None) if request else None
-            if questdb is not None:
-                try:
-                    volumes = await questdb.get_24h_volume("predict")
-                    yes_vol = volumes.get("axUSD-YES", 0) + volumes.get("YES-axUSD", 0)
-                    no_vol = volumes.get("axUSD-NO", 0) + volumes.get("NO-axUSD", 0)
-                    real_volume = yes_vol + no_vol
-                    if real_volume > 0:
-                        updates["trading_volume"] = round(real_volume, 2)
-                except Exception:
-                    pass
-
-            if updates:
-                m = m.model_copy(update=updates)
-            return m
+            # Get enriched volume and prices
+            enriched_m = (await _enrich_markets([m], request))[0]
+            
+            return enriched_m
     raise HTTPException(status_code=404, detail="Market not found")
 
 
@@ -440,15 +563,11 @@ async def get_prediction_history(
                 "QuestDB history query failed for market %d: %s", market_id, _exc,
             )
 
-    # Fallback: deterministic mock series
-    yes_history = _generate_price_series(market.prompt, days, market.yes_price)
-    no_history = _generate_price_series(
-        market.prompt, days, market.yes_price, invert=True,
-    )
+    # No data fallback: return empty history
     return PriceHistory(
         market_id=market_id,
-        yes_history=yes_history,
-        no_history=no_history,
+        yes_history=[],
+        no_history=[],
     )
 
 
@@ -456,21 +575,14 @@ async def get_prediction_history(
 
 
 @router.get("/stats/volume")
-async def get_prediction_volume():
+async def get_prediction_volume(request: Request):
     """24h trading volume across all prediction market pairs."""
     try:
-        registry = _load_registry()
-        if not registry:
-            # Fall back to sum from seed data
-            markets = _get_markets()
-            total = sum(m.trading_volume for m in markets)
-            return {"volume_24h": total, "source": "seed"}
-
-        # TODO: Query subgraph for actual 24h volume on prediction pairs
-        # For now, sum trading_volume from seed markets
         markets = _get_markets()
-        total = sum(m.trading_volume for m in markets)
-        return {"volume_24h": total, "source": "seed"}
+        enriched = await _enrich_markets_with_volume(markets, request)
+        total_24h = sum(m.trading_volume for m in enriched)
+        total_lifetime = sum(m.lifetime_volume for m in enriched)
+        return {"volume_24h": total_24h, "volume_lifetime": total_lifetime, "source": "questdb"}
     except Exception:
         return {"volume_24h": 0, "source": "error"}
 

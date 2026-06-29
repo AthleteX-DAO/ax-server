@@ -68,6 +68,23 @@ class SynthetixClient:
         """Get the Account NFT (ERC-721) contract address."""
         return self.core.functions.getAccountTokenAddress().call()
 
+    def get_account_id(self, wallet: str) -> int | None:
+        """Get the primary Synthetix account ID for a wallet."""
+        token_address = self.get_account_token_address()
+        abi = [
+            {"constant": True, "inputs": [{"name": "owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}], "type": "function"},
+            {"constant": True, "inputs": [{"name": "owner", "type": "address"}, {"name": "index", "type": "uint256"}], "name": "tokenOfOwnerByIndex", "outputs": [{"name": "", "type": "uint256"}], "type": "function"}
+        ]
+        contract = self.w3.eth.contract(address=token_address, abi=abi)
+        w_address = Web3.to_checksum_address(wallet)
+        try:
+            balance = contract.functions.balanceOf(w_address).call()
+            if balance > 0:
+                return contract.functions.tokenOfOwnerByIndex(w_address, 0).call()
+        except Exception:
+            pass
+        return None
+
     def get_account_collateral(
         self, account_id: int, collateral_type: str
     ) -> tuple[int, int, int]:
@@ -119,6 +136,32 @@ class SynthetixClient:
         """Get oracle price for a collateral token (18-decimal wei)."""
         ct = Web3.to_checksum_address(collateral_type)
         return self.core.functions.getCollateralPrice(ct).call()
+
+    def get_vault_collateral(self, pool_id: int, collateral_type: str) -> tuple[int, int]:
+        """Get total deposited collateral and its value for a pool.
+        Returns: Tuple of (amount, value) in wei.
+        """
+        ct = Web3.to_checksum_address(collateral_type)
+        result = self.core.functions.getVaultCollateral(pool_id, ct).call()
+        return result[0], result[1]
+
+    def get_vault_apy(self, pool_id: int, collateral_type: str, tvl: float) -> float:
+        """Calculate APY for a vault."""
+        if not self.addresses.rewards_distributor or tvl <= 0:
+            return 0.0
+        
+        ct = Web3.to_checksum_address(collateral_type)
+        distributor = Web3.to_checksum_address(self.addresses.rewards_distributor)
+        try:
+            rate_raw = self.core.functions.getRewardRate(pool_id, ct, distributor).call()
+            if rate_raw == 0:
+                return 0.0
+            
+            rate_per_second = rate_raw / 1e18
+            annual_rewards = rate_per_second * 365 * 24 * 3600
+            return (annual_rewards / tvl) * 100.0
+        except Exception:
+            return 0.0
 
     def get_preferred_pool(self) -> int:
         """Get the preferred pool ID."""
