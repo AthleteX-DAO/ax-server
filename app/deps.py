@@ -46,3 +46,16 @@ def get_synthetix_client(chain: ChainProviderDep, settings: SettingsDep):
 
 
 SynthetixClientDep = Annotated[object, Depends(get_synthetix_client)]
+
+
+def get_subgraph_client(settings: SettingsDep):
+    """Return a SubgraphClient wired to the configured subgraph URL.
+    
+    Lazily imported to avoid circular deps.
+    """
+    from app.chain.subgraph import SubgraphClient
+
+    return SubgraphClient(url=settings.dex_subgraph_url)
+
+
+SubgraphClientDep = Annotated[object, Depends(get_subgraph_client)]

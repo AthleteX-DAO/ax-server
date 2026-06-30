@@ -168,6 +168,45 @@ class SubgraphClient:
         logger.debug("get_pairs returned %d pairs for %d tokens", len(pairs), len(addrs))
         return pairs
 
+    async def get_pairs_by_sport(self, sport: str) -> list[dict[str, Any]]:
+        """Return all pairs matching a given sport tag."""
+        query = """
+        query GetPairsBySport($sport: String!) {
+          pairs(where: { sport: $sport }) {
+            id
+            token0 { id symbol name decimals }
+            token1 { id symbol name decimals }
+            reserve0
+            reserve1
+            reserveUSD
+            volumeUSD
+          }
+        }
+        """
+        data = await self._execute(query, {"sport": sport})
+        return data.get("pairs", [])
+
+    async def get_user_net_inflow(self, wallet: str) -> float:
+        """Get total net inflow USD for a user across all verticals."""
+        query = """
+        query GetUserNetInflow($id: ID!) {
+          user(id: $id) {
+            id
+            netInflowUSD
+            vaultInflowUSD
+            spotInflowUSD
+            perpsInflowUSD
+            predictionInflowUSD
+          }
+        }
+        """
+        data = await self._execute(query, {"id": wallet.lower()})
+        user = data.get("user")
+        if not user:
+            return 0.0
+        
+        return float(user.get("netInflowUSD", 0.0))
+
     async def get_pair_hour_data(
         self,
         pair_address: str,

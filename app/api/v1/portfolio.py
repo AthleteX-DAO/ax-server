@@ -21,6 +21,7 @@ from app.middleware.errors import (
     INVALID_WALLET_ADDRESS,
     CHAIN_ERROR,
 )
+from app.deps import SynthetixClientDep, SubgraphClientDep
 
 logger = logging.getLogger("ax-server.portfolio")
 
@@ -247,6 +248,7 @@ def _read_account_state(
 @router.get("/balance", response_model=BalanceResponse)
 async def get_wallet_balance(
     snx: SynthetixClientDep,
+    subgraph: SubgraphClientDep,
     wallet: str = Query(..., description="Wallet address (0x...)"),
 ) -> BalanceResponse:
     """Return AX, axUSD, USDC, MATIC balances and Synthetix V3 accounts."""
@@ -293,6 +295,43 @@ async def get_wallet_balance(
     except Exception:
         logger.debug("No Synthetix V3 accounts for %s (or read failed)", wallet)
 
+    # Query Net Inflow from Subgraph
+    net_inflow_axusd = 0.0
+    try:
+        net_inflow_axusd = await subgraph.get_user_net_inflow(wallet)
+    except Exception as exc:
+        logger.warning("Could not fetch Net Inflow from subgraph for %s: %s", wallet, exc)
+
+    # Calculate Current Portfolio Value in axUSD
+    # 1 USDC = 1 axUSD
+    # 1 axUSD = 1 axUSD
+    # For MATIC and AX, we'd query OracleManager here. For now, we mock prices to $1 for simplicity in scaffold.
+    matic_price_axusd = 1.0
+    ax_price_axusd = 1.0
+    usdc_value_axusd = (usdc_raw / 1e6) * 1.0
+    axusd_value_axusd = (axusd_raw / 1e18) * 1.0
+    matic_value_axusd = (matic_raw / 1e18) * matic_price_axusd
+    ax_value_axusd = (ax_raw / 1e18) * ax_price_axusd
+
+    # Account balances in Vaults
+    account_collateral_value_axusd = 0.0
+    for acc in accounts:
+        # Deposited collateral value
+        account_collateral_value_axusd += (float(acc.collateral_deposited) / 1e18) * 1.0 # Mock collateral price
+
+    current_portfolio_value_axusd = (
+        usdc_value_axusd + 
+        axusd_value_axusd + 
+        matic_value_axusd + 
+        ax_value_axusd + 
+        account_collateral_value_axusd
+    )
+
+    unrealized_return_axusd = current_portfolio_value_axusd - net_inflow_axusd
+    unrealized_return_pct = 0.0
+    if net_inflow_axusd > 0:
+        unrealized_return_pct = (unrealized_return_axusd / net_inflow_axusd) * 100.0
+
     return BalanceResponse(
         wallet=wallet,
         ax=str(ax_raw),
@@ -300,6 +339,10 @@ async def get_wallet_balance(
         usdc=str(usdc_raw),
         matic=str(matic_raw),
         gas_price_gwei=gas_price_gwei,
+        unrealized_return_usd=f"{unrealized_return_axusd:.2f}",
+        unrealized_return_pct=f"{unrealized_return_pct:.2f}",
+        change_24h_usd="0.0",
+        change_24h_pct="0.0",
         accounts=accounts,
     )
 

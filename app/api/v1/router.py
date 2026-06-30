@@ -19,8 +19,11 @@ from app.api.v1.history import router as history_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.predict_orders import router as predict_orders_router
 from app.api.v1.comments import router as comments_router
+from app.api.v1.oracle import router as oracle_router
 
 v1_router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+v1_router.include_router(oracle_router)
 
 v1_router.include_router(health_router)
 v1_router.include_router(markets_router)

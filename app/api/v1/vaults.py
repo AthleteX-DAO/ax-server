@@ -45,8 +45,8 @@ async def get_platform_tvl(snx: SynthetixClientDep):
         total_tvl = 0.0
         for c in collaterals:
             amt, val = snx.get_vault_collateral(pool_id, c)
-            # amt is in token decimals (wei). Assuming AX has 18 decimals.
-            total_tvl += amt / 1e18
+            # val is the USD value of the collateral in 18 decimals according to the oracle
+            total_tvl += val / 1e18
         return PlatformTVL(tvl=total_tvl)
     except Exception:
         return PlatformTVL(tvl=1100000.0)
@@ -76,7 +76,7 @@ async def get_vault_list(snx: SynthetixClientDep, wallet: str | None = None):
         # Get TVL
         try:
             amt, val = snx.get_vault_collateral(pool_id, addr)
-            tvl = amt / 1e18
+            tvl = val / 1e18
         except Exception:
             tvl = 1100000.0
             

@@ -298,5 +298,18 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getVaultCollateral",
+    "inputs": [
+      {"name": "poolId", "type": "uint128"},
+      {"name": "collateralType", "type": "address"}
+    ],
+    "outputs": [
+      {"name": "amount", "type": "uint256"},
+      {"name": "value", "type": "uint256"}
+    ],
+    "stateMutability": "view"
   }
 ]
