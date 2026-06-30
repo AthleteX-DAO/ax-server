@@ -52,8 +52,9 @@ CH_MARKET = "market"
 CH_ORDERBOOK = "orderbook"
 CH_TRADES = "trades"
 CH_SYSTEM = "system"
+CH_PORTFOLIO = "portfolio"
 
-ALL_CHANNELS = {CH_EXCHANGE_STATUS, CH_MARKET, CH_ORDERBOOK, CH_TRADES}
+ALL_CHANNELS = {CH_EXCHANGE_STATUS, CH_MARKET, CH_ORDERBOOK, CH_TRADES, CH_PORTFOLIO}
 
 # Minimal ABIs for on-chain reads
 _SPOT_QUERY_ABI = [
@@ -130,6 +131,7 @@ class ClientState:
     ws: WebSocket
     channels: set[str] = field(default_factory=set)
     market_ids: set[int] = field(default_factory=set)  # empty = all markets
+    wallet: str | None = None
     connected_at: float = field(default_factory=time.time)
     last_ping: float = field(default_factory=time.time)
 
@@ -263,13 +265,15 @@ class MarketPoller:
         return self._w3
 
     async def start(self) -> None:
-        """Start the background poller."""
+        """Start background polling tasks."""
+        if self._running:
+            return
         self._running = True
         self._task = asyncio.create_task(self._run())
-        logger.info("MarketPoller started")
+        logger.info("MarketPoller started (status 10s, orderbook 15s, portfolio 15s)")
 
     async def stop(self) -> None:
-        """Stop the background poller."""
+        """Stop background polling tasks."""
         self._running = False
         if self._task:
             self._task.cancel()
@@ -290,6 +294,9 @@ class MarketPoller:
                 # Market data every 2nd cycle (20s)
                 if cycle % 2 == 0:
                     await self._poll_markets()
+                    
+                # Portfolio data every 1.5 cycles (~15s interval via separate task logic or inline)
+                await self._tick_portfolio()
 
             except asyncio.CancelledError:
                 break
@@ -421,6 +428,38 @@ class MarketPoller:
         except Exception:
             logger.debug("Failed to read vault state for orderbook channel")
 
+    async def _tick_portfolio(self) -> None:
+        """Tick portfolio value for clients subscribed to portfolio."""
+        from app.api.v1.portfolio import get_wallet_balance
+        from app.deps import get_chain_provider, get_synthetix_client, get_subgraph_client
+        
+        # Get unique wallets from subscribed clients
+        subscribed_clients = []
+        async with manager._lock:
+            for ws, state in manager._clients.items():
+                if CH_PORTFOLIO in state.channels and state.wallet:
+                    subscribed_clients.append((ws, state.wallet))
+        
+        if not subscribed_clients:
+            return
+
+        settings = get_settings()
+        chain = get_chain_provider(settings)
+        snx = get_synthetix_client(chain, settings)
+        sg = get_subgraph_client(settings)
+
+        # Fetch and send balance per client
+        for ws, wallet in subscribed_clients:
+            try:
+                balance_resp = await get_wallet_balance(wallet, snx, sg)
+                await manager.send_to(ws, {
+                    "channel": CH_PORTFOLIO,
+                    "type": "portfolio_update",
+                    "data": balance_resp.model_dump(),
+                })
+            except Exception as e:
+                logger.warning(f"Failed to fetch portfolio for {wallet}: {e}")
+
 
 # Singleton poller
 poller = MarketPoller()
@@ -480,6 +519,10 @@ async def websocket_endpoint(ws: WebSocket):
             if cmd == "subscribe":
                 channels = msg.get("channels", [])
                 market_ids = msg.get("market_ids")
+                wallet = msg.get("wallet")
+                if wallet:
+                    state.wallet = wallet
+                    
                 if not channels:
                     await manager.send_to(ws, {
                         "channel": CH_SYSTEM,
