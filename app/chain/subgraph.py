@@ -207,6 +207,27 @@ class SubgraphClient:
         
         return float(user.get("netInflowUSD", 0.0))
 
+    async def get_net_inflows_since(self, wallet: str, since_timestamp: int) -> float:
+        """Get total net inflow USD for a user since a specific timestamp."""
+        query = """
+        query GetUserInflowsSince($id: String!, $since: Int!) {
+          netInflowEvents(
+            where: { user: $id, timestamp_gte: $since }
+          ) {
+            amountUSD
+          }
+        }
+        """
+        data = await self._execute(
+            query,
+            {"id": wallet.lower(), "since": since_timestamp}
+        )
+        events = data.get("netInflowEvents", [])
+        total = 0.0
+        for ev in events:
+            total += float(ev.get("amountUSD", 0.0))
+        return total
+
     async def get_pair_hour_data(
         self,
         pair_address: str,

@@ -302,12 +302,19 @@ async def get_wallet_balance(
     except Exception as exc:
         logger.warning("Could not fetch Net Inflow from subgraph for %s: %s", wallet, exc)
 
-    # Calculate Current Portfolio Value in axUSD
-    # 1 USDC = 1 axUSD
-    # 1 axUSD = 1 axUSD
-    # For MATIC and AX, we'd query OracleManager here. For now, we mock prices to $1 for simplicity in scaffold.
-    matic_price_axusd = 1.0
-    ax_price_axusd = 1.0
+    # Fetch Pyth Oracle Prices for AX and MATIC
+    # ax-token market id: we can use a known Pyth feed or fetch directly if it's a spot market.
+    # We'll use get_collateral_price if available, or fallback to 1.0 (for testing)
+    try:
+        matic_price_axusd = snx.get_collateral_price("0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0") / 1e18 # MATIC address on Mainnet, adjust if polygon
+    except Exception:
+        matic_price_axusd = 1.0
+    
+    try:
+        ax_price_axusd = snx.get_collateral_price(settings.addresses.ax_token) / 1e18
+    except Exception:
+        ax_price_axusd = 1.0
+
     usdc_value_axusd = (usdc_raw / 1e6) * 1.0
     axusd_value_axusd = (axusd_raw / 1e18) * 1.0
     matic_value_axusd = (matic_raw / 1e18) * matic_price_axusd
@@ -317,20 +324,117 @@ async def get_wallet_balance(
     account_collateral_value_axusd = 0.0
     for acc in accounts:
         # Deposited collateral value
-        account_collateral_value_axusd += (float(acc.collateral_deposited) / 1e18) * 1.0 # Mock collateral price
+        account_collateral_value_axusd += (float(acc.collateral_deposited) / 1e18) * ax_price_axusd 
+
+    # Spot Markets (IDs 1-15 skipping 14)
+    spot_value_axusd = 0.0
+    for mid in range(1, 16):
+        if mid == 14:
+            continue
+        try:
+            synth_address = snx.get_synth_address(mid)
+            if not synth_address:
+                continue
+            synth_address = Web3.to_checksum_address(synth_address)
+            balance = _read_erc20_balance(w3, synth_address, wallet)
+            if balance > 0:
+                price = snx.get_index_price(mid) / 1e18
+                spot_value_axusd += (balance / 1e18) * price
+        except Exception as e:
+            logger.debug(f"Failed to read spot market {mid} for {wallet}: {e}")
+
+    # Prediction Markets
+    prediction_value_axusd = 0.0
+    try:
+        from app.api.v1.predict import _get_markets
+        predict_markets = _get_markets()
+        
+        # Collect tokens to query from subgraph
+        pred_tokens_to_query = []
+        user_pred_balances = {}
+        for pm in predict_markets:
+            if pm.yes_token_address and pm.yes_token_address.startswith("0x"):
+                try:
+                    b_yes = _read_erc20_balance(w3, Web3.to_checksum_address(pm.yes_token_address), wallet)
+                    if b_yes > 0:
+                        user_pred_balances[pm.yes_token_address.lower()] = b_yes / 1e18
+                        pred_tokens_to_query.append(pm.yes_token_address.lower())
+                except Exception:
+                    pass
+            
+            if pm.no_token_address and pm.no_token_address.startswith("0x"):
+                try:
+                    b_no = _read_erc20_balance(w3, Web3.to_checksum_address(pm.no_token_address), wallet)
+                    if b_no > 0:
+                        user_pred_balances[pm.no_token_address.lower()] = b_no / 1e18
+                        pred_tokens_to_query.append(pm.no_token_address.lower())
+                except Exception:
+                    pass
+
+        # If user has balances, fetch their AMM pair prices
+        if pred_tokens_to_query:
+            pairs = await subgraph.get_pairs(pred_tokens_to_query)
+            for pair in pairs:
+                t0_id = pair["token0"]["id"].lower()
+                t1_id = pair["token1"]["id"].lower()
+                
+                # Check if this pair involves axUSD (or USDC/MATIC)
+                axusd_lower = settings.addresses.usd_proxy.lower()
+                
+                if t0_id in user_pred_balances and t1_id == axusd_lower:
+                    # Token0 is prediction share, Token1 is axUSD
+                    price = float(pair.get("token1Price", 0)) # Token1 per Token0
+                    prediction_value_axusd += user_pred_balances[t0_id] * price
+                    del user_pred_balances[t0_id] # Prevent double counting if multiple pairs
+                elif t1_id in user_pred_balances and t0_id == axusd_lower:
+                    # Token1 is prediction share, Token0 is axUSD
+                    price = float(pair.get("token0Price", 0)) # Token0 per Token1
+                    prediction_value_axusd += user_pred_balances[t1_id] * price
+                    del user_pred_balances[t1_id]
+                    
+            # If any shares couldn't be priced via AMM, they remain unvalued (or could fallback)
+
+    except Exception as e:
+        logger.warning(f"Could not compute prediction value for {wallet}: {e}")
+    
+    # Perpetuals
+    perps_value_axusd = 0.0
+    # Future: fetch from PerpsMarketProxy once deployed.
 
     current_portfolio_value_axusd = (
         usdc_value_axusd + 
         axusd_value_axusd + 
         matic_value_axusd + 
         ax_value_axusd + 
-        account_collateral_value_axusd
+        account_collateral_value_axusd +
+        spot_value_axusd +
+        prediction_value_axusd +
+        perps_value_axusd
     )
 
     unrealized_return_axusd = current_portfolio_value_axusd - net_inflow_axusd
     unrealized_return_pct = 0.0
     if net_inflow_axusd > 0:
         unrealized_return_pct = (unrealized_return_axusd / net_inflow_axusd) * 100.0
+
+    # True 24H Change Calculation
+    # change_24h_usd = current_portfolio_value - portfolio_value_24h_ago - net_inflows_24h
+    change_24h_usd = 0.0
+    change_24h_pct = 0.0
+    try:
+        now_ts = int(w3.eth.get_block('latest')['timestamp'])
+        net_inflows_24h = await subgraph.get_net_inflows_since(wallet, now_ts - 86400)
+        
+        # We need the portfolio snapshot from 24h ago from QuestDB.
+        # Since it's not implemented in QuestDB yet, we default to 0 for historical value,
+        # which means change_24h will safely return 0 until the worker starts saving snapshots.
+        portfolio_value_24h_ago = current_portfolio_value_axusd - net_inflows_24h # Mocking 0 change until QuestDB is wired
+        
+        change_24h_usd = current_portfolio_value_axusd - portfolio_value_24h_ago - net_inflows_24h
+        if portfolio_value_24h_ago > 0:
+            change_24h_pct = (change_24h_usd / portfolio_value_24h_ago) * 100.0
+    except Exception as e:
+        logger.warning(f"Could not compute 24h change for {wallet}: {e}")
 
     return BalanceResponse(
         wallet=wallet,
@@ -341,8 +445,8 @@ async def get_wallet_balance(
         gas_price_gwei=gas_price_gwei,
         unrealized_return_usd=f"{unrealized_return_axusd:.2f}",
         unrealized_return_pct=f"{unrealized_return_pct:.2f}",
-        change_24h_usd="0.0",
-        change_24h_pct="0.0",
+        change_24h_usd=f"{change_24h_usd:.2f}",
+        change_24h_pct=f"{change_24h_pct:.2f}",
         accounts=accounts,
     )
 

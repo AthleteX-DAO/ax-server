@@ -39,130 +39,45 @@ def get_chain_provider_optional():
     except Exception:
         return None
 
-# ── Seed data ────────────────────────────────────────────────────────────
-# Migrated from ax_dapp GetPredictionMarketDataUseCase._buildMockPredictionMarkets
-# so the frontend can fetch from a single source of truth.
-
-_MARKETS: list[dict] = [
-    {"id": 1, "prompt": "who will win superbowl 2026",
-     "details": "Projected championship odds for the 2026 Super Bowl field.",
-     "category": "football", "end_date": "2026-02-08"},
-    {"id": 2, "prompt": "who will win the fifa world cup",
-     "details": "Outright winner market for the 2026 FIFA World Cup.",
-     "category": "soccer", "end_date": "2026-07-19"},
-    {"id": 3, "prompt": "who will win the Winter Olympics",
-     "details": "Overall medal table leader for the 2026 Winter Games.",
-     "category": "exotic", "end_date": "2026-02-22"},
-    {"id": 4, "prompt": "NFL Playoffs Bracket Set",
-     "details": "Market on the final AFC/NFC playoff bracket seeding.",
-     "category": "football", "end_date": "2026-01-05"},
-    {"id": 5, "prompt": "2026 NBA Finals MVP",
-     "details": "MVP honors for the 2026 NBA Finals series.",
-     "category": "basketball", "end_date": "2026-06-25"},
-    {"id": 6, "prompt": "2026 NBA Finals Champion",
-     "details": "Outright winner for the 2026 NBA title.",
-     "category": "basketball", "end_date": "2026-06-20"},
-    {"id": 7, "prompt": "2026 World Series Winner",
-     "details": "Which club lifts the Commissioner's Trophy in 2026.",
-     "category": "baseball", "end_date": "2026-11-05"},
-    {"id": 8, "prompt": "2026 Stanley Cup Champion",
-     "details": "NHL postseason futures for the 2026 Stanley Cup.",
-     "category": "hockey", "end_date": "2026-06-15"},
-    {"id": 9, "prompt": "2026 March Madness Champion",
-     "details": "Who cuts down the nets at the 2026 NCAA tournament.",
-     "category": "college", "end_date": "2026-04-06"},
-    {"id": 10, "prompt": "2026 College Football Champion",
-     "details": "CFP title odds for the 2026 season.",
-     "category": "college", "end_date": "2026-01-12"},
-    {"id": 11, "prompt": "2026 UEFA Champions League Winner",
-     "details": "Outright UCL winner for the 2025/26 campaign.",
-     "category": "soccer", "end_date": "2026-05-31"},
-    {"id": 12, "prompt": "2026 Copa America Winner",
-     "details": "Champion of the expanded 2026 Copa America field.",
-     "category": "soccer", "end_date": "2026-07-12"},
-    {"id": 13, "prompt": "2026 Formula 1 Constructors Champion",
-     "details": "Team standings futures for the 2026 F1 season.",
-     "category": "exotic", "end_date": "2026-12-01"},
-    {"id": 14, "prompt": "2026 Wimbledon Women's Champion",
-     "details": "Ladies' singles outright at Wimbledon 2026.",
-     "category": "exotic", "end_date": "2026-07-11"},
-    {"id": 15, "prompt": "2026 US Open Men's Champion",
-     "details": "Mens singles outright at Flushing Meadows 2026.",
-     "category": "exotic", "end_date": "2026-09-13"},
-    {"id": 16, "prompt": "Community pick: shorten shot clock to 22s?",
-     "details": "Community governance vote on pro basketball shot clocks.",
-     "category": "voted", "end_date": "2026-03-15"},
-    {"id": 17, "prompt": "2026 NBA Draft #1 Pick",
-     "details": "Who goes first overall in the 2026 NBA Draft.",
-     "category": "basketball", "end_date": "2026-06-10"},
-    {"id": 18, "prompt": "2026 AL MVP Winner",
-     "details": "American League MVP honors for the 2026 season.",
-     "category": "baseball", "end_date": "2026-11-20"},
-    {"id": 19, "prompt": "2026 NHL Hart Trophy Winner",
-     "details": "League MVP futures for the 2025/26 NHL season.",
-     "category": "hockey", "end_date": "2026-06-22"},
-    {"id": 20, "prompt": "2026 NFL Offensive Rookie of the Year",
-     "details": "OROY race for the incoming 2026 rookie class.",
-     "category": "football", "end_date": "2027-02-10"},
-    {"id": 21, "prompt": "Will the Lakers win 50+ games?",
-     "details": "Regular season win total market for Los Angeles.",
-     "category": "basketball", "end_date": "2026-04-15"},
-    {"id": 22, "prompt": "Will the Yankees make the postseason?",
-     "details": "New York Yankees playoff berth odds for 2026.",
-     "category": "baseball", "end_date": "2026-10-02"},
-    {"id": 23, "prompt": "Will Messi score 20+ MLS goals in 2026?",
-     "details": "Goal-scoring prop for Lionel Messi's 2026 MLS season.",
-     "category": "soccer", "end_date": "2026-10-20"},
-    {"id": 24, "prompt": "Will Colorado reach 8+ wins?",
-     "details": "Regular season win total for Colorado football.",
-     "category": "college", "end_date": "2026-12-05"},
-    # ── Real deployed market ─────────────────────────────────────
-    {"id": 25,
-     "prompt": "Will Jelly Roll and Bunnie Xo finalize their divorce by August 1, 2026?",
-     "details": "Resolves YES if Jelly Roll (Jason DeFord) and Bunnie Xo have their divorce finalized by a court on or before August 1, 2026. Resolves NO otherwise.",
-     "category": "exotic", "end_date": "2026-08-01",
-     "market_address": "0x164c1b6e1C9F3c088D3930eDE9fCA4ea8C11Ad9F",
-     "yes_token": "0xAfa41dAd6Eeb7155c2A327c4a33E4503BF172D01",
-     "no_token": "0xcf3558796C2e38B3277AbEAd647B341390d3e07d",
-     "live": True},
-]
+def _load_registry() -> list[dict]:
+    import json
+    from pathlib import Path
+    registry_path = Path(__file__).resolve().parents[3] / "data" / "markets_registry.json"
+    if not registry_path.exists():
+        return []
+    try:
+        return json.loads(registry_path.read_text()).get("markets", [])
+    except Exception:
+        return []
 
 
 def _build_markets() -> list[PredictMarket]:
-    """Build the full list of PredictMarket objects with default values."""
+    """Build the full list of PredictMarket objects with default values from the registry."""
     results: list[PredictMarket] = []
-    for m in _MARKETS:
+    
+    for m in _load_registry():
+        if m.get("status") != "active":
+            continue
+            
         yes_price = 0.50
         no_price = 0.50
         volume = 0.0
         lifetime_volume = 0.0
 
-        mid = m["id"]
-
-        # Use real addresses for deployed markets, synthetic for seed data
-        if "market_address" in m:
-            market_address = m["market_address"]
-            yes_token = m["yes_token"]
-            no_token = m["no_token"]
-        else:
-            market_address = f"0x{mid:040X}"
-            yes_token = f"0x{(mid * 2 + 1):040X}"
-            no_token = f"0x{(mid * 2 + 2):040X}"
-
         results.append(
             PredictMarket(
-                id=mid,
+                id=m["id"],
                 prompt=m["prompt"],
-                details=m["details"],
-                market_address=market_address,
-                yes_token_address=yes_token,
-                no_token_address=no_token,
+                details=m.get("details", ""),
+                market_address=m.get("market_address", ""),
+                yes_token_address=m.get("yes_token", ""),
+                no_token_address=m.get("no_token", ""),
                 yes_price=yes_price,
                 no_price=no_price,
                 trading_volume=volume,
                 lifetime_volume=lifetime_volume,
-                end_date=m["end_date"],
-                category=m["category"],
+                end_date=m.get("resolve_by", ""),
+                category=m.get("category", "exotic"),
             )
         )
     return results
@@ -182,18 +97,6 @@ def _get_markets() -> list[PredictMarket]:
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 
-import json
-from pathlib import Path
-
-def _load_registry() -> list[dict]:
-    registry_path = Path(__file__).resolve().parents[3] / "data" / "markets_registry.json"
-    if not registry_path.exists():
-        return []
-    import json
-    try:
-        return json.loads(registry_path.read_text()).get("markets", [])
-    except Exception:
-        return []
 
 @router.post("/build-approve", response_model=TxResponse)
 async def build_predict_approve(
@@ -291,9 +194,10 @@ async def _enrich_markets(markets: list[PredictMarket], request: Request) -> lis
     if request:
         try:
             from app.api.v1.predict import get_chain_provider_optional
-            chain = get_chain_provider_optional(request)
-        except Exception:
-            pass
+            chain = get_chain_provider_optional()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to load chain provider: {e}")
 
     w3 = chain.w3 if chain else None
     if w3:
